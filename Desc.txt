@@ -1,0 +1,3 @@
+When kernel-mode authentication is disabled, the request is passed through to user-mode and IIS 7/7.5 performs the authentication. The user token established in this case will be that of the actual user, and impersonation occurs with this identity instead of the application pool identity.
+
+Therefore, when kernel-mode authentication is enabled, you might see the identity of the application pool in some of your application's HTTP contexts, because the kernel mode can pre-authenticate incoming requests under this account.
