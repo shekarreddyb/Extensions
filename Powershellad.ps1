@@ -83,3 +83,22 @@ $fileContent = Invoke-Command -Session $session -ScriptBlock {
 Remove-PSSession -Session $session
 
 
+
+# chnage kernel mode
+
+# Import the WebAdministration Module
+Import-Module WebAdministration
+
+# Set the website name
+$websiteName = "YourWebsiteName"
+
+# Get the windowsAuthentication configuration section
+$winAuthSection = Get-WebConfigurationSection -pspath "MACHINE/WEBROOT/APPHOST/$websiteName" -filter "system.webServer/security/authentication/windowsAuthentication"
+
+# Set useKernelMode to false
+$winAuthSection["useKernelMode"] = $false
+
+# Apply the changes
+$winAuthSection | Set-WebConfiguration -pspath "MACHINE/WEBROOT/APPHOST/$websiteName" -filter "system.webServer/security/authentication/windowsAuthentication"
+
+
