@@ -19,3 +19,39 @@ $AccountGroups
 
 # Close the remote session
 Remove-PSSession $ADSession
+
+
+
+
+
+
+#reolace file from local
+
+# Define the local and remote file paths
+$localFilePath = "C:\path\to\your\local\file"
+$remoteFilePath = "C:\path\to\your\remote\file"
+
+# Define the remote computer name
+$computerName = "RemoteMachineName"
+
+# Create a new PSSession
+$session = New-PSSession -ComputerName $computerName
+
+# Invoke command on the remote machine
+Invoke-Command -Session $session -ScriptBlock {
+    param($remoteFilePath, $localFileContent)
+
+    # Ensure the remote directory exists
+    $remoteDirectory = Split-Path -Path $remoteFilePath -Parent
+    if (-not (Test-Path -Path $remoteDirectory)) {
+        New-Item -ItemType Directory -Force -Path $remoteDirectory
+    }
+
+    # Write the local file content to the remote file
+    [System.IO.File]::WriteAllBytes($remoteFilePath, $localFileContent)
+
+} -ArgumentList $remoteFilePath, (Get-Content -Path $localFilePath -Encoding Byte)
+
+# Close the PSSession
+Remove-PSSession -Session $session
+
