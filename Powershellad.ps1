@@ -55,3 +55,7 @@ Invoke-Command -Session $session -ScriptBlock {
 # Close the PSSession
 Remove-PSSession -Session $session
 
+#download file from remote
+
+
+
