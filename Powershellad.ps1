@@ -57,5 +57,29 @@ Remove-PSSession -Session $session
 
 #download file from remote
 
+# Define the remote and local file paths
+$remoteFilePath = "C:\path\to\your\remote\file"
+$localFilePath = "C:\path\to\your\local\file"
+
+# Define the remote computer name
+$computerName = "RemoteMachineName"
+
+# Create a new PSSession
+$session = New-PSSession -ComputerName $computerName
+
+# Invoke command on the remote machine to get the file content
+$fileContent = Invoke-Command -Session $session -ScriptBlock {
+    param($remoteFilePath)
+
+    # Get the content of the remote file
+    [System.IO.File]::ReadAllBytes($remoteFilePath)
+
+} -ArgumentList $remoteFilePath
+
+# Write the remote file content to the local file
+[System.IO.File]::WriteAllBytes($localFilePath, $fileContent)
+
+# Close the PSSession
+Remove-PSSession -Session $session
 
 
