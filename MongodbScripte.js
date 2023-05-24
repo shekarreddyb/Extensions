@@ -111,3 +111,29 @@ db.collectionName.aggregate([
 ])
 
 
+// combine collections
+
+db.metric.aggregate([
+  {
+    $lookup: {
+      from: "capacity",
+      localField: "name",
+      foreignField: "resourceid",
+      as: "resource"
+    }
+  },
+  {
+    $unwind: "$resource"
+  },
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      quantity: 1,
+      maxVal: "$resource.maxVal",
+      percentage: { $multiply: [{ $divide: ["$quantity", "$resource.maxVal"] }, 100] }
+    }
+  }
+])
+
+
