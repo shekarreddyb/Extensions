@@ -1,2 +1,2 @@
 # Extensions
-List of snippets I used on regular basis.
+List of snippets I use on regular basis.
