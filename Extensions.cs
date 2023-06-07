@@ -200,8 +200,74 @@ namespace extensions
         {
             return string.Join(separator, sequence);
         }
+        
+        //usage: SendEmailAsync().FireAndForget(errorHandler => Console.WriteLine(errorHandler.Message));
+        public static void FireAndForget(this Task task,  Action<Exception> errorHandler = null)
+        {
+             task.ContinueWith(t =>
+              {
+                if (t.IsFaulted && errorHandler != null)
+                    errorHandler(t.Exception);
+              }, TaskContinuationOptions.OnlyOnFaulted);
+         }
+        
+        // usage: var result = await (() => GetResultAsync()).Retry(3, TimeSpan.FromSeconds(1));
+        public static async Task<TResult> Retry<TResult>(this Func<Task<TResult>> taskFactory, int maxRetries, TimeSpan delay)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    return await taskFactory().ConfigureAwait(false);
+                }
+                catch
+                {
+                    if (i == maxRetries - 1)
+                        throw;
+                    await Task.Delay(delay).ConfigureAwait(false);
+                }
+            }
 
+            return default(TResult); // Should not be reached
+        }
+       // usage: await GetResultAsync().OnFailure(ex => Console.WriteLine(ex.Message));
+        public static async Task OnFailure(this Task task, Action<Exception> onFailure)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                onFailure(ex);
+            }
+        }
+        
+        // usage:  await GetResultAsync().WithTimeout(TimeSpan.FromSeconds(1));
+        // .net6 has WaitAsync (TimeSpan timeout); https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.waitasync?view=net-7.0#system-threading-tasks-task-waitasync(system-timespan)
+        public static async Task WithTimeout(this Task task, TimeSpan timeout)
+        {
+            var delayTask = Task.Delay(timeout);
+            var completedTask = await Task.WhenAny(task, delayTask).ConfigureAwait(false);
+            if (completedTask == delayTask)
+                throw new TimeoutException();
 
+            await task;
+        }
+        
+        // usage:  var result = await GetResultAsync().Fallback("fallback");
+        public static async Task<TResult> Fallback<TResult>(this Task<TResult> task, TResult fallbackValue)
+        {
+            try
+            {
+                return await task.ConfigureAwait(false);
+            }
+            catch
+            {
+                return fallbackValue;
+            }
+        }
+        
     }
     public static class Abbreviations
     {
