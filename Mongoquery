@@ -6,6 +6,20 @@ var client = new MongoClient("your_connection_string");
 var database = client.GetDatabase("your_database");
 var collection = database.GetCollection<BsonDocument>("billing_cvrrecord");
 
+int yearCondition = 2023; // replace with your year
+int monthCondition = 6; // replace with your month
+
+var match = new BsonDocument
+{
+    {
+        "$match",
+        new BsonDocument
+        {
+            { "CreatedOn", new BsonDocument { { "$gte", new DateTime(yearCondition, monthCondition, 1) }, { "$lt", new DateTime(yearCondition, monthCondition + 1, 1) } } }
+        }
+    }
+};
+
 var groupByDay = new BsonDocument
 {
     {
@@ -32,7 +46,7 @@ var groupByAppIdentifier = new BsonDocument
 
 var sort = new BsonDocument { { "$sort", new BsonDocument { { "maxDailyTotal", -1 } } } };
 
-var pipeline = new[] { groupByDay, groupByAppIdentifier, sort };
+var pipeline = new[] { match, groupByDay, groupByAppIdentifier, sort };
 var result = collection.Aggregate<BsonDocument>(pipeline).ToList();
 
 foreach (var doc in result)
