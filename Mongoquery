@@ -1,0 +1,41 @@
+using MongoDB.Driver;
+using MongoDB.Bson;
+// ...
+
+var client = new MongoClient("your_connection_string");
+var database = client.GetDatabase("your_database");
+var collection = database.GetCollection<BsonDocument>("billing_cvrrecord");
+
+var groupByDay = new BsonDocument
+{
+    {
+        "$group",
+        new BsonDocument
+        {
+            { "_id", new BsonDocument { { "appidentifier", "$appidentifier" }, { "day", new BsonDocument("$dayOfMonth", "$CreatedOn") }, { "month", new BsonDocument("$month", "$CreatedOn") }, { "year", new BsonDocument("$year", "$CreatedOn") } } },
+            { "dailyTotal", new BsonDocument("$sum", "$quantity") }
+        }
+    }
+};
+
+var groupByAppIdentifier = new BsonDocument
+{
+    {
+        "$group",
+        new BsonDocument
+        {
+            { "_id", "$_id.appidentifier" },
+            { "maxDailyTotal", new BsonDocument("$max", "$dailyTotal") }
+        }
+    }
+};
+
+var sort = new BsonDocument { { "$sort", new BsonDocument { { "maxDailyTotal", -1 } } } };
+
+var pipeline = new[] { groupByDay, groupByAppIdentifier, sort };
+var result = collection.Aggregate<BsonDocument>(pipeline).ToList();
+
+foreach (var doc in result)
+{
+    Console.WriteLine(doc.ToString());
+}
