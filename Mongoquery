@@ -61,3 +61,22 @@ foreach (var doc in result)
 {
     Console.WriteLine(doc.ToString());
 }
+
+
+public class AppQuantityResult
+{
+    [BsonElement("_id")]
+    public IdField Id { get; set; }
+
+    [BsonElement("maxDailyTotal")]
+    public double MaxDailyTotal { get; set; }
+
+    public class IdField
+    {
+        [BsonElement("appidentifier")]
+        public string AppIdentifier { get; set; }
+
+        [BsonElement("CostDriverName")]
+        public string CostDriverName { get; set; }
+    }
+}
