@@ -63,6 +63,10 @@ foreach (var doc in result)
 }
 
 
+
+
+
+
 public class AppQuantityResult
 {
     [BsonElement("_id")]
@@ -80,3 +84,64 @@ public class AppQuantityResult
         public string CostDriverName { get; set; }
     }
 }
+// original query for compass
+[
+    {
+        "$match": {
+            "CreatedOn": {
+                "$gte": ISODate("2023-01-01T00:00:00Z"),
+                "$lt": ISODate("2023-02-01T00:00:00Z")
+            },
+            "CostDriverName": {
+                "$in": ["WAP", "TAS", "TKGI", "Azure", "GCP"]
+            },
+            "$or": [
+                {
+                    "Billable": {
+                        "$exists": false
+                    }
+                },
+                {
+                    "Billable": "B"
+                }
+            ]
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "Day": {
+                    "$dayOfMonth": "$CreatedOn"
+                },
+                "AppIdentifier": {
+                    "$arrayElemAt": [
+                        {
+                            "$split": ["$appidentifier", "-"]
+                        },
+                        0
+                    ]
+                },
+                "CostDriverName": "$CostDriverName",
+                "Environment": "$Environment"
+            },
+            "DailyTotal": {
+                "$sum": {
+                    "$toDecimal": "$quantity"
+                }
+            }
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "AppIdentifier": "$_id.AppIdentifier",
+                "CostDriverName": "$_id.CostDriverName",
+                "Environment": "$_id.Environment"
+            },
+            "MaxDailyTotal": {
+                "$max": "$DailyTotal"
+            }
+        }
+    }
+]
+
