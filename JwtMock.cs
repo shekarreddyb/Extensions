@@ -47,4 +47,37 @@ public class TestAuthHandler : JwtBearerHandler
 
 
 
+public class YourIntegrationTests : IDisposable
+{
+    private readonly TestServer _server;
+    private readonly HttpClient _client;
+
+    public YourIntegrationTests()
+    {
+        var webHostBuilder = new WebHostBuilder()
+            .UseStartup<Startup>()
+            .ConfigureTestServices(services =>
+            {
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                }).AddScheme<JwtBearerOptions, TestAuthHandler>("TestAuthScheme", options => { });
+            });
+
+        _server = new TestServer(webHostBuilder);
+        _client = _server.CreateClient();
+    }
+
+    // Implement your tests here
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        _server.Dispose();
+    }
+}
+
+
+
 
