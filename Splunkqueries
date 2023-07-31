@@ -1,0 +1,9 @@
+index=<your_index> sourcetype=<your_sourcetype>
+| spath input=msg path=@t output=time
+| spath input=msg path=@mt output=message_type
+| spath input=msg
+| mvexpand msg
+| eval msg = split(msg, ",")
+| mvexpand msg
+| rex field=msg "(?<key>\w+):(?<value>.+)"
+| table time, message_type, key, value
