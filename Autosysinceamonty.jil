@@ -1,0 +1,14 @@
+insert_job: my_monthly_job job_type: c
+command: /path/to/my/command
+machine: localhost
+owner: [email]
+permission: gx,ge,wx,we
+date_conditions: 1
+days_of_week: all
+run_window: "00:00 - 00:59"
+start_times: "00:00"
+start_month: "Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec"
+description: "This job runs once a month at 12:00 AM"
+std_out_file: "/path/to/my/output.log"
+std_err_file: "/path/to/my/error.log"
+alarm_if_fail: 1
