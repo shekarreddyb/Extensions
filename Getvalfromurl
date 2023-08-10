@@ -1,0 +1,8 @@
+const url = window.location.href;
+const guidPattern = /https:\/\/m\.c\.abc\.com\/obr\/mr\/edit\/([^#]+)/i;
+const matches = url.match(guidPattern);
+
+if (matches && matches[1]) {
+    const guid = matches[1];
+    console.log(guid); // This will log the extracted GUID to the console.
+}
