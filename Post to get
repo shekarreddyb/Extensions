@@ -1,0 +1,33 @@
+[HttpGet]
+public async Task<IActionResult> GetWithBody()
+{
+    // Use StreamReader to read from the request body
+    using var reader = new StreamReader(Request.Body);
+    var body = await reader.ReadToEndAsync();
+
+    // Deserialize the body using System.Text.Json
+    var model = JsonSerializer.Deserialize<GetRequestBody>(body);
+
+    // Do something with the model
+    // ...
+
+    return Ok();
+}
+
+
+
+import { HttpClient } from '@angular/common/http';
+// ...
+
+constructor(private http: HttpClient) { }
+
+someMethod() {
+  const body = {
+    key: 'value',
+    // ... other properties
+  };
+
+  this.http.get('/your-endpoint-url', { body: body }).subscribe(response => {
+    console.log(response);
+  });
+}
