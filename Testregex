@@ -1,0 +1,22 @@
+using System;
+using System.Text.RegularExpressions;
+
+class Program
+{
+    static void Main()
+    {
+        Console.WriteLine(IsValidFileName("P1aU2bD3cexample.txt"));  // Should return true
+        Console.WriteLine(IsValidFileName("extraP1aU3bD5cexample.txt"));  // Should return true
+        Console.WriteLine(IsValidFileName("P12U34D56example.txt"));  // Should return false
+    }
+
+    static bool IsValidFileName(string fileName)
+    {
+        // Regular expression to match the given criteria.
+        // .+ ensures at least one character exists before 'P'.
+        // [A-Za-z]\d matches one alphabet character followed by one digit.
+        string pattern = @".+P[A-Za-z]\dU[A-Za-z]\dD[A-Za-z]\d.*\.txt$";
+
+        return Regex.IsMatch(fileName, pattern);
+    }
+}
