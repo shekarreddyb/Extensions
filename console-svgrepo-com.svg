@@ -3,3 +3,43 @@
 <path fill-rule="evenodd" clip-rule="evenodd" d="M3.21967 4.46967C3.51256 4.17678 3.98744 4.17678 4.28033 4.46967L11.2803 11.4697C11.5732 11.7626 11.5732 12.2374 11.2803 12.5303L4.28033 19.5303C3.98744 19.8232 3.51256 19.8232 3.21967 19.5303C2.92678 19.2374 2.92678 18.7626 3.21967 18.4697L9.68934 12L3.21967 5.53033C2.92678 5.23744 2.92678 4.76256 3.21967 4.46967Z" fill="#000000"/>
 <path fill-rule="evenodd" clip-rule="evenodd" d="M9.25 19C9.25 18.5858 9.58579 18.25 10 18.25H20.25C20.6642 18.25 21 18.5858 21 19C21 19.4142 20.6642 19.75 20.25 19.75H10C9.58579 19.75 9.25 19.4142 9.25 19Z" fill="#000000"/>
 </svg>
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    .container {
+      background-color: #98FB98; /* Warm Green */
+      display: flex;
+      align-items: center; /* Vertically align content */
+      justify-content: center; /* Horizontally align content */
+      height: 200px; /* Container height */
+    }
+    .icon {
+      margin-right: 20px;
+    }
+    .text-container {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- SVG Icon -->
+    <div class="icon">
+      <svg height="50" width="50">
+        <circle cx="25" cy="25" r="20" stroke="black" stroke-width="3" fill="white" />
+      </svg>
+    </div>
+
+    <!-- Text -->
+    <div class="text-container">
+      <h2>Heading</h2>
+      <p>Caption beneath the heading</p>
+    </div>
+  </div>
+
+</body>
+</html>
