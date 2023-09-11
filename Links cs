@@ -1,0 +1,13 @@
+public void ConfigureServices(IServiceCollection services)
+{
+    services.AddControllers();
+    services.AddLinks(config =>
+    {
+        config.AddPolicy<PaginatedResult<Item>>(policy =>
+        {
+            policy.RequireRoutedLink("self", "GetItems", null, cond => true, new { });
+            policy.RequireRoutedLink("nextPage", "GetItems", r => new { page = r.CurrentPage + 1, sortBy = r.SortBy }, r => r.CurrentPage < r.TotalPages);
+            policy.RequireRoutedLink("prevPage", "GetItems", r => new { page = r.CurrentPage - 1, sortBy = r.SortBy }, r => r.CurrentPage > 1);
+        });
+    });
+}
