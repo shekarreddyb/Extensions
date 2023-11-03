@@ -1,4 +1,4 @@
-iiusing Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -86,4 +86,36 @@ public SortDefinition<BsonDocument> CreateSortDefinition(string jsonSort)
     }
 
     return sortDefinition;
+}
+
+
+using MongoDB.Bson;
+using MongoDB.Driver;
+using Newtonsoft.Json.Linq;
+
+public SortDefinition<BsonDocument> CreateSortDefinition(string jsonSort)
+{
+    var sortDefinitionBuilder = Builders<BsonDocument>.Sort;
+    var sortDefinitions = new List<SortDefinition<BsonDocument>>();
+    
+    // Parse the JSON to get sort fields and their order
+    var sortFields = JObject.Parse(jsonSort);
+
+    foreach (var field in sortFields)
+    {
+        // Determine the sort order for each field
+        var fieldName = field.Key;
+        var sortOrder = field.Value.ToObject<int>();
+        
+        var sortDefinition = sortOrder == 1 
+            ? sortDefinitionBuilder.Ascending(fieldName) 
+            : sortDefinitionBuilder.Descending(fieldName);
+        
+        sortDefinitions.Add(sortDefinition);
+    }
+
+    // Combine all sort definitions
+    var combinedSortDefinition = sortDefinitionBuilder.Combine(sortDefinitions);
+    
+    return combinedSortDefinition;
 }
