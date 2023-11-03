@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Builder;
+iiusing Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -60,3 +60,30 @@ app.MapGet("/data", async (string collectionName, string sortBy, int page, int p
 });
 
 app.Run();
+
+
+
+
+
+
+using MongoDB.Bson;
+using MongoDB.Driver;
+using System.Collections.Generic;
+
+public SortDefinition<BsonDocument> CreateSortDefinition(string jsonSort)
+{
+    var sortDefinitionBuilder = Builders<BsonDocument>.Sort;
+    SortDefinition<BsonDocument> sortDefinition = null;
+
+    var sortParams = BsonDocument.Parse(jsonSort);
+    foreach (var sortParam in sortParams)
+    {
+        var direction = sortParam.Value.AsInt32 == 1 ?
+                        sortDefinitionBuilder.Ascending(sortParam.Name) :
+                        sortDefinitionBuilder.Descending(sortParam.Name);
+
+        sortDefinition = sortDefinition == null ? direction : sortDefinition.Combine(direction);
+    }
+
+    return sortDefinition;
+}
