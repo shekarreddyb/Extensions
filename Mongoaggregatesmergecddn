@@ -1,0 +1,27 @@
+{
+    $merge: {
+        into: "targetCollection", // replace with your target collection name
+        on: ["appid", "env", "csdriverid", "yearmonth"], // fields to match on
+        whenMatched: [
+            {
+                $addFields: {
+                    "convertedExistingQuantity": { $toDecimal: "$quantity" },
+                    "convertedNewQuantity": { $toDecimal: "$$new.quantity" }
+                }
+            },
+            {
+                $addFields: {
+                    "update": {
+                        $cond: {
+                            if: { $lt: ["$convertedExistingQuantity", "$convertedNewQuantity"] },
+                            then: "$$new",
+                            else: "$$ROOT"
+                        }
+                    }
+                }
+            },
+            { $replaceRoot: { newRoot: "$update" } }
+        ],
+        whenNotMatched: "insert" // insert the document if no match is found
+    }
+}
