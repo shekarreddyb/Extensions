@@ -16,7 +16,7 @@ for /L %%i in (1,1,%loop_count%) do (
   cf push !app_name! ^
 )
 
-REM Wait for all background jobs to finish
-wait
+REM Wait for a few seconds to allow the cf push commands to finish (adjust the timeout as needed)
+timeout /t 10 /nobreak
 
 endlocal
