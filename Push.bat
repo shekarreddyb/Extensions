@@ -1,22 +1,18 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-REM Check if a loop count argument is provided
+REM Check if iteration count parameter is provided
 if "%~1"=="" (
-  echo Usage: push_apps.bat <loop_count>
-  exit /b 1
+    echo Please provide an iteration count.
+    exit /b
 )
 
-REM Get the loop count from the command-line argument
-set loop_count=%~1
+set ITERATION_COUNT=%~1
 
-REM Loop from 1 to the specified loop_count
-for /L %%i in (1,1,%loop_count%) do (
-  set app_name=app%%i
-  cf push !app_name! ^
+REM Loop through the specified number of iterations
+for /L %%i in (1,1,%ITERATION_COUNT%) do (
+    REM Execute cf push command with a unique app name in parallel
+    START "Pushing app%%i" cf push app%%i
 )
 
-REM Wait for a few seconds to allow the cf push commands to finish (adjust the timeout as needed)
-timeout /t 10 /nobreak
-
-endlocal
+echo All commands have been started.
