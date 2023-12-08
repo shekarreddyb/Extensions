@@ -109,3 +109,55 @@ db.yourCollectionName.aggregate([
     }
 ])
 ```
+
+then
+
+```javascript
+db.yourCollectionName.aggregate([
+    {
+        $match: { "AppIdentifier": { "$exists": true } }
+    },
+    {
+        $addFields: {
+            "identifierWithoutGUID": {
+                $arrayElemAt: [
+                    { $split: [ "$AppIdentifier", "." ] },
+                    0
+                ]
+            }
+        }
+    },
+    {
+        $addFields: {
+            "splitByIdentifierAndHyphen": { $split: [ "$identifierWithoutGUID", "-" ] }
+        }
+    },
+    {
+        $addFields: {
+            "identifierWithoutGUIDAndHyphen": {
+                $cond: {
+                    if: { $gt: [ { $size: "$splitByIdentifierAndHyphen" }, 1 ] },
+                    then: { $reduce: {
+                            input: { $slice: [ "$splitByIdentifierAndHyphen", 0, { $subtract: [ { $size: "$splitByIdentifierAndHyphen" }, 1 ] } ] },
+                            initialValue: "",
+                            in: { $concat: [ "$$value", "$$this", "-" ] }
+                        }
+                    },
+                    else: { $arrayElemAt: [ "$splitByIdentifierAndHyphen", 0 ] }
+                }
+            }
+        }
+    },
+    {
+        $project: {
+            "identifierWithoutGUIDAndHyphen": { $substrCP: [ "$identifierWithoutGUIDAndHyphen", 0, { $subtract: [ { $strLenCP: "$identifierWithoutGUIDAndHyphen" }, 1 ] } ] }
+        }
+    },
+    {
+        $group: {
+            _id: "$identifierWithoutGUIDAndHyphen",
+            firstDocId: { $first: "$_id" }
+        }
+    }
+])
+```
