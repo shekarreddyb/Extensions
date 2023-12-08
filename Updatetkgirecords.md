@@ -68,3 +68,44 @@ db.yourCollectionName.aggregate([
 - Ensure that your regular expression in `updateMany` accurately reflects the logic you want for matching `AppIdentifier`.
 - Always test this on a subset of your data or in a non-production environment to ensure it behaves as expected, especially since string manipulations can be tricky.
 - This approach assumes that `AppIdentifier` always contains both a period and a hyphen. Adjust the logic if this is not the case.
+
+
+```javascript
+db.yourCollectionName.aggregate([
+    {
+        $match: { "AppIdentifier": { "$exists": true } }
+    },
+    {
+        $addFields: {
+            "identifierWithoutGUID": {
+                $arrayElemAt: [
+                    { $split: [ "$AppIdentifier", "." ] },
+                    0
+                ]
+            }
+        }
+    },
+    {
+        $addFields: {
+            "identifierWithoutGUIDAndHyphen": {
+                $reduce: {
+                    input: { $slice: [ { $split: [ "$identifierWithoutGUID", "-" ] }, 0, -1 ] },
+                    initialValue: "",
+                    in: { $concat: [ "$$value", "$$this", "-" ] }
+                }
+            }
+        }
+    },
+    {
+        $project: {
+            "identifierWithoutGUIDAndHyphen": { $substrCP: [ "$identifierWithoutGUIDAndHyphen", 0, { $subtract: [ { $strLenCP: "$identifierWithoutGUIDAndHyphen" }, 1 ] } ] }
+        }
+    },
+    {
+        $group: {
+            _id: "$identifierWithoutGUIDAndHyphen",
+            firstDocId: { $first: "$_id" }
+        }
+    }
+])
+```
