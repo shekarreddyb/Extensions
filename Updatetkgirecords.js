@@ -10,3 +10,27 @@ db.yourCollectionName.find({ "AppIdentifier": { "$exists": true } }).forEach(doc
         { $set: { /* your update parameters */ } }
     );
 });
+
+
+
+db.yourCollectionName.aggregate([
+    {
+        $match: { "AppIdentifier": { "$exists": true } }
+    },
+    {
+        $addFields: {
+            "identifierWithoutGUID": {
+                $arrayElemAt: [
+                    { $split: [ "$AppIdentifier", "." ] },
+                    0
+                ]
+            }
+        }
+    },
+    {
+        $group: {
+            _id: "$identifierWithoutGUID",
+            firstDocId: { $first: "$_id" }
+        }
+    }
+])
