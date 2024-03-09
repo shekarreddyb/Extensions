@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dropdown Example</title>
+    <script>
+        // JavaScript array with dropdown options
+        const dropdownOptions = ["Option 1", "Option 2", "Option 3", "Option 4"];
+
+        // Function to populate the dropdown
+        function populateDropdown() {
+            const selectElement = document.getElementById("dynamicDropdown");
+            dropdownOptions.forEach(option => {
+                const newOption = document.createElement("option");
+                newOption.text = option;
+                newOption.value = option;
+                selectElement.add(newOption);
+            });
+        }
+
+        // Function to handle dropdown change event
+        function onDropdownChange() {
+            const selectedValue = document.getElementById("dynamicDropdown").value;
+            alert("You selected: " + selectedValue); // or any other logic
+        }
+
+        // Call populateDropdown on page load
+        window.onload = function() {
+            populateDropdown();
+        }
+    </script>
+</head>
+<body>
+    <select id="dynamicDropdown" onchange="onDropdownChange()">
+        <!-- Options will be added here by JavaScript -->
+    </select>
+</body>
+</html>
