@@ -1,39 +1,24 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dropdown Example</title>
-    <script>
-        // JavaScript array with dropdown options
-        const dropdownOptions = ["Option 1", "Option 2", "Option 3", "Option 4"];
+document.addEventListener("DOMContentLoaded", function() {
+    // Array of options for the dropdown
+    const options = ["Option 1", "Option 2", "Option 3", "Option 4"];
 
-        // Function to populate the dropdown
-        function populateDropdown() {
-            const selectElement = document.getElementById("dynamicDropdown");
-            dropdownOptions.forEach(option => {
-                const newOption = document.createElement("option");
-                newOption.text = option;
-                newOption.value = option;
-                selectElement.add(newOption);
-            });
-        }
-
-        // Function to handle dropdown change event
-        function onDropdownChange() {
-            const selectedValue = document.getElementById("dynamicDropdown").value;
-            alert("You selected: " + selectedValue); // or any other logic
-        }
-
-        // Call populateDropdown on page load
-        window.onload = function() {
-            populateDropdown();
-        }
-    </script>
-</head>
-<body>
-    <select id="dynamicDropdown" onchange="onDropdownChange()">
-        <!-- Options will be added here by JavaScript -->
-    </select>
-</body>
-</html>
+    // Create select element
+    const select = document.createElement("select");
+    select.setAttribute("id", "dynamicSelect");
+    
+    // Populate select element with options
+    options.forEach(option => {
+        const opt = document.createElement("option");
+        opt.value = option;
+        opt.innerHTML = option;
+        select.appendChild(opt);
+    });
+    
+    // Append select element to the dropdown container
+    document.getElementById("dropdownContainer").appendChild(select);
+    
+    // Add event listener for the select element
+    select.addEventListener("change", function() {
+        alert("You selected: " + this.value);
+    });
+});
