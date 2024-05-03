@@ -1,0 +1,36 @@
+using System;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+namespace HttpClientExample
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            HttpClientHandler handler = new HttpClientHandler();
+
+            // WARNING: This bypasses the validation of SSL certificates.
+            // Use with caution and only if you understand the security implications.
+            handler.ServerCertificateCustomValidationCallback = (HttpRequestMessage request, X509Certificate2 certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors) =>
+            {
+                // Check if the certificate is your specific self-signed certificate
+                if (certificate.Issuer.Equals("CN=my-self-signed-cert"))
+                {
+                    return true; // Accept the self-signed certificate
+                }
+
+                // Otherwise, use the default validation
+                return sslPolicyErrors == SslPolicyErrors.None;
+            };
+
+            using (HttpClient client = new HttpClient(handler))
+            {
+                // Use your HttpClient as needed
+                var response = client.GetAsync("https://yourserver.com").Result;
+                Console.WriteLine(response.StatusCode);
+            }
+        }
+    }
+}
