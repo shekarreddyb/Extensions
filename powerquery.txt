@@ -1,0 +1,1 @@
+Date.ToText(DateTime.From(Number.FromText(Text.Middle([UnixTimestamp], 12, 10)) / 1000 / 86400 + #datetime(1970, 1, 1, 0, 0, 0)), "yyyy-MM-dd")
