@@ -3,9 +3,9 @@ $force = $false
 
 # Define DNS record objects for CNAME operations with additional fields
 $dnsRecords = @(
-    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='example.com'; Destination='host1.example.com'; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Add'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300},
-    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='delete.me.com'; Destination=$null; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Delete'; DnsAprovalStatus='Cancelled'; DnsApprovalValue=1; TimeToLive=300},
-    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='modify.me.com'; Destination='newhost.example.com'; DnsRecordType='CNAME'; DnsZone='zone2.com'; IsRoundRobin=$false; DnsOperation='Modify'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300}
+    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='example.com'; Destination='host1.example.com'; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Add'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300; Forced=$false},
+    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='delete.me.com'; Destination=$null; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Delete'; DnsAprovalStatus='Cancelled'; DnsApprovalValue=1; TimeToLive=300; Forced=$false},
+    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='modify.me.com'; Destination='newhost.example.com'; DnsRecordType='CNAME'; DnsZone='zone2.com'; IsRoundRobin=$false; DnsOperation='Modify'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300; Forced=$false}
 )
 
 # List of DNS servers
@@ -29,12 +29,23 @@ function Verify-DNSChange {
 }
 
 # Conditional filtering based on the force variable
-$approvedRecords = if ($force) {
-    $dnsRecords
-} else {
-    $dnsRecords | Where-Object {
-        ($_._DnsOperation -in @('Add', 'Modify') -and $_.DnsAprovalStatus -eq 'Approved') -or 
-        ($_._DnsOperation -eq 'Delete' -and $_.DnsAprovalStatus -eq 'Cancelled')
+$approvedRecords = $dnsRecords | Where-Object {
+    if ($force) {
+        ($_.DnsOperation -in @('Add', 'Modify') -and $_.DnsAprovalStatus -eq 'Approved') -or 
+        ($_.DnsOperation -eq 'Delete' -and $_.DnsAprovalStatus -in @('Approved', 'Cancelled')) -or
+        ($_.DnsAprovalStatus -eq 'Completed' -and ($_.DnsOperation -in @('Add', 'Modify', 'Delete')))
+    } else {
+        ($_.DnsOperation -in @('Add', 'Modify') -and $_.DnsAprovalStatus -eq 'Approved') -or 
+        ($_.DnsOperation -eq 'Delete' -and $_.DnsAprovalStatus -in @('Approved', 'Cancelled'))
+    }
+}
+
+# Mark records as forced if applicable
+if ($force) {
+    $approvedRecords | ForEach-Object {
+        if ($_.DnsAprovalStatus -eq 'Completed') {
+            $_.Forced = $true
+        }
     }
 }
 
