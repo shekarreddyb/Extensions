@@ -1,7 +1,10 @@
+# Define the force variable
+$force = $false
+
 # Define DNS record objects for CNAME operations with additional fields
 $dnsRecords = @(
     [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='example.com'; Destination='host1.example.com'; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Add'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300},
-    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='delete.me.com'; Destination=$null; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Delete'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300},
+    [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='delete.me.com'; Destination=$null; DnsRecordType='CNAME'; DnsZone='zone1.com'; IsRoundRobin=$false; DnsOperation='Delete'; DnsAprovalStatus='Cancelled'; DnsApprovalValue=1; TimeToLive=300},
     [PSCustomObject]@{AppDnsEntryId=[guid]::NewGuid(); AppRequestId=[guid]::NewGuid(); VanityUrl='modify.me.com'; Destination='newhost.example.com'; DnsRecordType='CNAME'; DnsZone='zone2.com'; IsRoundRobin=$false; DnsOperation='Modify'; DnsAprovalStatus='Approved'; DnsApprovalValue=1; TimeToLive=300}
 )
 
@@ -25,8 +28,15 @@ function Verify-DNSChange {
     return Check-DNSRecordExists -record $record -server $server
 }
 
-# Filter records to only those in Approved state
-$approvedRecords = $dnsRecords | Where-Object { $_.DnsAprovalStatus -eq 'Approved' }
+# Conditional filtering based on the force variable
+$approvedRecords = if ($force) {
+    $dnsRecords
+} else {
+    $dnsRecords | Where-Object {
+        ($_._DnsOperation -in @('Add', 'Modify') -and $_.DnsAprovalStatus -eq 'Approved') -or 
+        ($_._DnsOperation -eq 'Delete' -and $_.DnsAprovalStatus -eq 'Cancelled')
+    }
+}
 
 # Perform pre-checks in parallel
 $preCheckResults = $dnsServers | ForEach-Object -Parallel {
@@ -41,7 +51,7 @@ $preCheckResults = $dnsServers | ForEach-Object -Parallel {
                             ($record.DnsOperation -eq 'Delete' -and $exists) -or
                             ($record.DnsOperation -eq 'Modify' -and $exists)
         }
-    } -ArgumentList $_, $using:approvedRecords -ThrottleLimit 5
+    } -ArgumentList $_, $using:approvedRecords
 
     $results
 } -ArgumentList $approvedRecords -ThrottleLimit 5
@@ -128,7 +138,7 @@ $verificationResults = $approvedRecords | ForEach-Object -Parallel {
             Server = $server
             Success = Verify-DNSChange -record $record -server $server
         }
-    } -ArgumentList $_, $record -ThrottleLimit 5
+    } -ArgumentList $_, $record
 
     $successfulServers = $successfulServers | Where-Object { $_.Success } | Select-Object -ExpandProperty Server
 
