@@ -16,16 +16,21 @@ function Check-DNSRecordExists {
     param ($record, $server)
     try {
         $result = Resolve-DnsName -Name $record.VanityUrl -Type $record.DnsRecordType -Server $server -DnsOnly -ErrorAction Stop
-        return $result.NameHost -eq $record.Destination
+        return $result
     } catch {
-        return $false
+        return $null
     }
 }
 
 # Function to verify DNS changes on a single server
 function Verify-DNSChange {
     param ($record, $server)
-    return Check-DNSRecordExists -record $record -server $server
+    $result = Check-DNSRecordExists -record $record -server $server
+    if ($record.DnsOperation -eq 'Add' -or $record.DnsOperation -eq 'Modify') {
+        return $result -and $result.NameHost -eq $record.Destination
+    } elseif ($record.DnsOperation -eq 'Delete') {
+        return -not $result
+    }
 }
 
 # Conditional filtering based on the force variable
@@ -54,13 +59,20 @@ $preCheckResults = $dnsServers | ForEach-Object -Parallel {
     param ($server, $approvedRecords)
     $results = $approvedRecords | ForEach-Object -Parallel {
         param ($record, $server)
-        $exists = Check-DNSRecordExists -record $record -server $server
+        $result = Check-DNSRecordExists -record $record -server $server
+        $exists = $result -ne $null
+        $isDifferentDestination = $exists -and $result.NameHost -ne $record.Destination
+
+        $shouldProcess = switch ($record.DnsOperation) {
+            'Add' { -not $exists }
+            'Modify' { $exists -and $isDifferentDestination }
+            'Delete' { $exists }
+        }
+
         [PSCustomObject]@{
             Server = $server
             Record = $record
-            ShouldProcess = ($record.DnsOperation -eq 'Add' -and -not $exists) -or 
-                            ($record.DnsOperation -eq 'Delete' -and $exists) -or
-                            ($record.DnsOperation -eq 'Modify' -and $exists)
+            ShouldProcess = $shouldProcess
         }
     } -ArgumentList $_, $using:approvedRecords
 
