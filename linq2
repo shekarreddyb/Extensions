@@ -1,0 +1,34 @@
+// Step 1: Build the initial query
+var initialLocationQuery = from env in dbContext.Environments
+                           where env.EnvironmentId == inputEnvironmentId
+                           select env.Location;
+
+var initialLocation = initialLocationQuery.FirstOrDefault();
+
+var remainingLocationsQuery = from ce in dbContext.ComponentEnvironments
+                              join e in dbContext.Environments on ce.EnvironmentId equals e.EnvironmentId
+                              where ce.ComponentId == inputComponentId && ce.EnvironmentId != inputEnvironmentId
+                              select e.Location;
+
+var remainingLocations = remainingLocationsQuery.ToList();
+
+var baseQuery = from ce in dbContext.ComponentEnvironments
+                join e1 in dbContext.Environments on ce.EnvironmentId equals e1.EnvironmentId
+                join dcp in dbContext.DatacenterPairs on e1.Location equals dcp.F1
+                where ce.ComponentId == inputComponentId
+                select new
+                {
+                    ce.ComponentEnvironmentId,
+                    ce.EnvironmentId,
+                    ce.ComponentId,
+                    DatacenterPair = dcp,
+                    InitialLocation = e1.Location
+                };
+
+// Step 2: Apply filters using IQueryable.Where
+var filteredQuery = baseQuery
+    .Where(result => result.InitialLocation == initialLocation &&
+                     remainingLocations.Contains(result.DatacenterPair.F2) &&
+                     (result.DatacenterPair.F3 == null || remainingLocations.Contains(result.DatacenterPair.F3)));
+
+var result = filteredQuery.ToList();
