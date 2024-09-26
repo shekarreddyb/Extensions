@@ -2,9 +2,10 @@
 $Force = "true"  # Replace this with the actual value passed
 $Force = [bool]::Parse($Force)
 
-# Define separate caches for AD user and group checks
+# Define separate caches for AD user, group checks, and group members
 $userCheckCache = @{}
 $groupCheckCache = @{}
+$groupMembersCache = @{}
 
 # Function to check if a user exists in AD
 function Check-ADUserExists {
@@ -20,6 +21,13 @@ function Check-ADGroupExists {
     return $true  # Mock result, replace with actual AD check
 }
 
+# Function to get group members
+function Get-ADGroupMembers {
+    param($AdGroupName)
+    # Add your AD lookup logic here (e.g., using Get-ADGroupMember)
+    return @("user1", "user2")  # Mock result, replace with actual AD check
+}
+
 # Function to add a user to an AD group
 function Add-UserToGroup {
     param($NTLoginId, $AdGroupName)
@@ -30,6 +38,12 @@ function Add-UserToGroup {
 function Remove-UserFromGroup {
     param($NTLoginId, $AdGroupName)
     Write-Host "Removing user $NTLoginId from group $AdGroupName"
+}
+
+# Function to log specific actions
+function Log-Action {
+    param($NTLoginId, $AdGroupName, $ApprovalStatus, $Action)
+    Write-Host "Logging: $Action for user $NTLoginId in group $AdGroupName with status $ApprovalStatus."
 }
 
 # Sample array of objects
@@ -62,6 +76,11 @@ foreach ($item in $items) {
 
         # Cache the result
         $groupCheckCache[$AdGroupName] = $groupExists
+
+        # If group exists, cache the group members
+        if ($groupExists) {
+            $groupMembersCache[$AdGroupName] = Get-ADGroupMembers $AdGroupName
+        }
     }
 
     # Retrieve cached results
@@ -73,10 +92,12 @@ foreach ($item in $items) {
         # Determine the action based on the ApprovalStatus
         if (($ApprovalStatus -eq 'Approved' -or ($ApprovalStatus -eq 'Completed' -and $Force)) -or
             ($ApprovalStatus -eq 'Suspended' -and $Force)) {
-            # Add user to group
+            # Log and then add user to group
+            Log-Action -NTLoginId $NTLoginId -AdGroupName $AdGroupName -ApprovalStatus $ApprovalStatus -Action "Adding"
             Add-UserToGroup -NTLoginId $NTLoginId -AdGroupName $AdGroupName
         } elseif (($ApprovalStatus -eq 'Canceled') -or ($ApprovalStatus -eq 'Suspended' -and -not $Force)) {
-            # Remove user from group
+            # Log and then remove user from group
+            Log-Action -NTLoginId $NTLoginId -AdGroupName $AdGroupName -ApprovalStatus $ApprovalStatus -Action "Removing"
             Remove-UserFromGroup -NTLoginId $NTLoginId -AdGroupName $AdGroupName
         }
     } else {
