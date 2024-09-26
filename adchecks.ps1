@@ -49,7 +49,6 @@ function Add-UsersToGroup {
     param($NTLoginIds, $AdGroupName)
     
     try {
-        # Add multiple users to the AD group
         Add-ADGroupMember -Identity $AdGroupName -Members $NTLoginIds -ErrorAction Stop
         Write-Host "Successfully added users: $($NTLoginIds -join ', ') to group $AdGroupName."
     } catch {
@@ -62,7 +61,6 @@ function Remove-UsersFromGroup {
     param($NTLoginIds, $AdGroupName)
     
     try {
-        # Remove multiple users from the AD group
         Remove-ADGroupMember -Identity $AdGroupName -Members $NTLoginIds -Confirm:$false -ErrorAction Stop
         Write-Host "Successfully removed users: $($NTLoginIds -join ', ') from group $AdGroupName."
     } catch {
@@ -73,25 +71,30 @@ function Remove-UsersFromGroup {
 # Function to verify if users were successfully added or removed
 function Verify-GroupMembers {
     param($NTLoginIds, $AdGroupName, $Operation)
-    
+    $results = @()
+
     # Get the updated group members
     $updatedMembers = Get-ADGroupMembers -AdGroupName $AdGroupName
     
-    if ($Operation -eq "Add") {
-        $missingUsers = $NTLoginIds | Where-Object { $_ -notin $updatedMembers }
-        if ($missingUsers.Count -eq 0) {
-            Write-Host "All users successfully added to group $AdGroupName."
-        } else {
-            Write-Warning "The following users were not added to group $AdGroupName: $($missingUsers -join ', ')"
+    foreach ($NTLoginId in $NTLoginIds) {
+        $verificationResult = $false
+        if ($Operation -eq "Add") {
+            if ($NTLoginId -in $updatedMembers) {
+                $verificationResult = $true
+            }
+        } elseif ($Operation -eq "Remove") {
+            if ($NTLoginId -notin $updatedMembers) {
+                $verificationResult = $true
+            }
         }
-    } elseif ($Operation -eq "Remove") {
-        $remainingUsers = $NTLoginIds | Where-Object { $_ -in $updatedMembers }
-        if ($remainingUsers.Count -eq 0) {
-            Write-Host "All users successfully removed from group $AdGroupName."
-        } else {
-            Write-Warning "The following users were not removed from group $AdGroupName: $($remainingUsers -join ', ')"
+        # Store the verification result
+        $results += [pscustomobject]@{
+            AdGroupName = $AdGroupName
+            NTLoginId   = $NTLoginId
+            Success     = $verificationResult
         }
     }
+    return $results
 }
 
 # Sample array of objects
@@ -183,13 +186,27 @@ foreach ($group in $groups) {
     $groupMembersCacheAfter[$group] = Get-ADGroupMembers -AdGroupName $group
 }
 
-# Step 5: Verification
+# Step 5: Verification and collecting results for database update
+$verificationResults = @()
 foreach ($groupName in $usersToAdd.Keys) {
     $users = $usersToAdd[$groupName]
-    Verify-GroupMembers -NTLoginIds $users -AdGroupName $groupName -Operation "Add"
+    $verificationResults += Verify-GroupMembers -NTLoginIds $users -AdGroupName $groupName -Operation "Add"
 }
 
 foreach ($groupName in $usersToRemove.Keys) {
     $users = $usersToRemove[$groupName]
-    Verify-GroupMembers -NTLoginIds $users -AdGroupName $groupName -Operation "Remove"
+    $verificationResults += Verify-GroupMembers -NTLoginIds $users -AdGroupName $groupName -Operation "Remove"
+}
+
+# Now $verificationResults contains the data with GroupName, NTLoginId, and Success boolean
+# You can loop through this and call your stored procedure for each result
+
+foreach ($result in $verificationResults) {
+    $AdGroupName = $result.AdGroupName
+    $NTLoginId = $result.NTLoginId
+    $Success = $result.Success
+
+    # Call your stored procedure here with $AdGroupName, $NTLoginId, and $Success
+    # Example: Execute your stored procedure using Invoke-SqlCmd or your preferred method
+    Write-Host "Updating database with Group: $AdGroupName, User: $NTLoginId, Success: $Success"
 }
