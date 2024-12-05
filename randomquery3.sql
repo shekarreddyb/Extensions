@@ -11,66 +11,73 @@ WITH FilteredApplications AS (
           AND c.ApprovalStatusId > 30 AND c.ApprovalStatusId < 2284
     )
 ),
-NewApplications AS (
-    SELECT 
-        CONCAT(YEAR(car.CreatedOn), ' Q', DATEPART(QUARTER, car.CreatedOn)) AS QuarterLabel,
-        COUNT(DISTINCT car.apprequestid) AS NewApps
-    FROM CloudApplicationRequest car
-    WHERE EXISTS (
-        SELECT 1 
-        FROM Components c
-        WHERE c.apprequestid = car.apprequestid
-          AND c.ApprovalStatusId > 30 AND c.ApprovalStatusId < 2284
-    )
-    GROUP BY CONCAT(YEAR(car.CreatedOn), ' Q', DATEPART(QUARTER, car.CreatedOn))
-),
-AllApplications AS (
-    SELECT 
-        CONCAT(YEAR(car.CreatedOn), ' Q', DATEPART(QUARTER, car.CreatedOn)) AS QuarterLabel,
-        COUNT(DISTINCT car.apprequestid) AS AllApps
-    FROM CloudApplicationRequest car
-    WHERE EXISTS (
-        SELECT 1 
-        FROM Components c
-        WHERE c.apprequestid = car.apprequestid
-          AND c.ApprovalStatusId > 30 AND c.ApprovalStatusId < 2284
-    )
-    AND DATEPART(YEAR, car.CreatedOn) * 10 + DATEPART(QUARTER, car.CreatedOn) <=
-        (SELECT MAX(DATEPART(YEAR, CreatedOn) * 10 + DATEPART(QUARTER, CreatedOn)) FROM CloudApplicationRequest)
-    GROUP BY CONCAT(YEAR(car.CreatedOn), ' Q', DATEPART(QUARTER, car.CreatedOn))
-),
 FilteredComponents AS (
     SELECT 
         c.id AS ComponentId,
         c.CreatedOn,
-        CONCAT(YEAR(c.CreatedOn), ' Q', DATEPART(QUARTER, c.CreatedOn)) AS QuarterLabel
+        CONCAT(YEAR(c.CreatedOn), ' Q', DATEPART(QUARTER, c.CreatedOn)) AS QuarterLabel,
+        c.apprequestid
     FROM Components c
     WHERE c.ApprovalStatusId > 30 AND c.ApprovalStatusId < 2284
 ),
+Quarters AS (
+    SELECT DISTINCT 
+        CONCAT(YEAR(CreatedOn), ' Q', DATEPART(QUARTER, CreatedOn)) AS QuarterLabel,
+        YEAR(CreatedOn) AS Year,
+        DATEPART(QUARTER, CreatedOn) AS Quarter
+    FROM CloudApplicationRequest
+    UNION
+    SELECT DISTINCT 
+        CONCAT(YEAR(CreatedOn), ' Q', DATEPART(QUARTER, CreatedOn)) AS QuarterLabel,
+        YEAR(CreatedOn) AS Year,
+        DATEPART(QUARTER, CreatedOn) AS Quarter
+    FROM Components
+),
+NewApplications AS (
+    SELECT 
+        q.QuarterLabel,
+        COUNT(DISTINCT fa.apprequestid) AS NewApps
+    FROM Quarters q
+    LEFT JOIN FilteredApplications fa 
+        ON CONCAT(YEAR(fa.CreatedOn), ' Q', DATEPART(QUARTER, fa.CreatedOn)) = q.QuarterLabel
+    GROUP BY q.QuarterLabel
+),
+AllApplications AS (
+    SELECT 
+        q.QuarterLabel,
+        COUNT(DISTINCT fa.apprequestid) AS AllApps
+    FROM Quarters q
+    LEFT JOIN FilteredApplications fa 
+        ON fa.CreatedOn <= DATEADD(QUARTER, 1, DATEFROMPARTS(q.Year, (q.Quarter - 1) * 3 + 1, 1)) 
+    GROUP BY q.QuarterLabel
+),
 NewComponents AS (
     SELECT 
-        fc.QuarterLabel,
+        q.QuarterLabel,
         COUNT(DISTINCT fc.ComponentId) AS NewComponents
-    FROM FilteredComponents fc
-    GROUP BY fc.QuarterLabel
+    FROM Quarters q
+    LEFT JOIN FilteredComponents fc 
+        ON CONCAT(YEAR(fc.CreatedOn), ' Q', DATEPART(QUARTER, fc.CreatedOn)) = q.QuarterLabel
+    GROUP BY q.QuarterLabel
 ),
 AllComponents AS (
     SELECT 
-        CONCAT(YEAR(fc.CreatedOn), ' Q', DATEPART(QUARTER, fc.CreatedOn)) AS QuarterLabel,
+        q.QuarterLabel,
         COUNT(DISTINCT fc.ComponentId) AS AllComponents
-    FROM FilteredComponents fc
-    WHERE DATEPART(YEAR, fc.CreatedOn) * 10 + DATEPART(QUARTER, fc.CreatedOn) <=
-          (SELECT MAX(DATEPART(YEAR, CreatedOn) * 10 + DATEPART(QUARTER, CreatedOn)) FROM Components)
-    GROUP BY CONCAT(YEAR(fc.CreatedOn), ' Q', DATEPART(QUARTER, fc.CreatedOn))
+    FROM Quarters q
+    LEFT JOIN FilteredComponents fc 
+        ON fc.CreatedOn <= DATEADD(QUARTER, 1, DATEFROMPARTS(q.Year, (q.Quarter - 1) * 3 + 1, 1)) 
+    GROUP BY q.QuarterLabel
 )
 SELECT 
-    na.QuarterLabel,
+    q.QuarterLabel,
     COALESCE(na.NewApps, 0) AS NewApps,
     COALESCE(aa.AllApps, 0) AS AllApps,
     COALESCE(nc.NewComponents, 0) AS NewComponents,
     COALESCE(ac.AllComponents, 0) AS AllComponents
-FROM NewApplications na
-FULL OUTER JOIN AllApplications aa ON na.QuarterLabel = aa.QuarterLabel
-FULL OUTER JOIN NewComponents nc ON na.QuarterLabel = nc.QuarterLabel
-FULL OUTER JOIN AllComponents ac ON na.QuarterLabel = ac.QuarterLabel
-ORDER BY na.QuarterLabel;
+FROM Quarters q
+LEFT JOIN NewApplications na ON q.QuarterLabel = na.QuarterLabel
+LEFT JOIN AllApplications aa ON q.QuarterLabel = aa.QuarterLabel
+LEFT JOIN NewComponents nc ON q.QuarterLabel = nc.QuarterLabel
+LEFT JOIN AllComponents ac ON q.QuarterLabel = ac.QuarterLabel
+ORDER BY q.Year, q.Quarter;
