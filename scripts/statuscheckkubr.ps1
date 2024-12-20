@@ -13,7 +13,7 @@ $token = Get-Content $tokenPath
 $startTime = Get-Date
 
 # Function to call Kubernetes API and parse the response
-function Get-JobStatus {
+function Get-JobDetails {
     $response = curl.exe -s -X GET `
         -H "Authorization: Bearer $($token)" `
         -H "Content-Type: application/json" `
@@ -23,40 +23,51 @@ function Get-JobStatus {
     return $response | ConvertFrom-Json
 }
 
-# Function to check job status
-function Check-JobStatus {
-    param($status)
+# Function to check job completion status
+function Check-JobCompletion {
+    param($job)
 
-    # Check if the job is completed
-    if ($status.conditions -and ($status.conditions | Where-Object { $_.type -eq "Complete" -and $_.status -eq "True" })) {
+    $spec = $job.spec
+    $status = $job.status
+
+    # Get values from spec and status
+    $requiredCompletions = $spec.completions
+    $parallelism = $spec.parallelism
+    $backoffLimit = $spec.backoffLimit
+    $succeeded = $status.succeeded
+    $failed = $status.failed
+    $active = $status.active
+
+    # Check if the job is complete
+    if ($succeeded -ge $requiredCompletions) {
         Write-Output "Job has completed successfully."
         return "Complete"
     }
 
-    # Check if the job has failed (backoff limit exceeded or retries exhausted)
-    if ($status.conditions -and ($status.conditions | Where-Object { $_.type -eq "Failed" -and $_.status -eq "True" })) {
-        Write-Output "Job has failed."
+    # Check if the job has failed due to exceeding the backoff limit
+    if ($failed -ge $backoffLimit) {
+        Write-Output "Job has failed due to exceeded retries."
         return "Failed"
     }
 
     # Check if the job is still running
-    if ($status.active -gt 0) {
+    if ($active -gt 0) {
         Write-Output "Job is still running..."
         return "Running"
     }
 
-    # Default: Job is not active and no complete/failed condition found
-    Write-Output "Unknown job status."
+    # Default: Unknown state
+    Write-Output "Unknown job status. Investigate manually."
     return "Unknown"
 }
 
 # Poll the job status until completion, failure, or timeout
 while ($true) {
-    # Get the current job status
-    $job = Get-JobStatus
+    # Get the current job details
+    $job = Get-JobDetails
 
-    # Check the job status
-    $status = Check-JobStatus -status $job.status
+    # Check the job completion status
+    $status = Check-JobCompletion -job $job
     if ($status -ne "Running") {
         break
     }
