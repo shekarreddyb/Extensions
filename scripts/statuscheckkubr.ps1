@@ -23,35 +23,28 @@ function Get-JobDetails {
     return $response | ConvertFrom-Json
 }
 
-# Function to check job completion status
-function Check-JobCompletion {
+# Function to check job status
+function Check-JobStatus {
     param($job)
 
-    $spec = $job.spec
     $status = $job.status
 
-    # Get values from spec and status
-    $requiredCompletions = $spec.completions
-    $parallelism = $spec.parallelism
-    $backoffLimit = $spec.backoffLimit
-    $succeeded = $status.succeeded
-    $failed = $status.failed
-    $active = $status.active
-
-    # Check if the job is complete
-    if ($succeeded -ge $requiredCompletions) {
-        Write-Output "Job has completed successfully."
-        return "Complete"
-    }
-
-    # Check if the job has failed due to exceeding the backoff limit
-    if ($failed -ge $backoffLimit) {
-        Write-Output "Job has failed due to exceeded retries."
-        return "Failed"
+    # Check conditions
+    if ($status.conditions) {
+        foreach ($condition in $status.conditions) {
+            if ($condition.type -eq "Complete" -and $condition.status -eq "True") {
+                Write-Output "Job has completed successfully."
+                return "Complete"
+            }
+            if ($condition.type -eq "Failed" -and $condition.status -eq "True") {
+                Write-Output "Job has failed."
+                return "Failed"
+            }
+        }
     }
 
     # Check if the job is still running
-    if ($active -gt 0) {
+    if ($status.active -gt 0) {
         Write-Output "Job is still running..."
         return "Running"
     }
@@ -67,7 +60,7 @@ while ($true) {
     $job = Get-JobDetails
 
     # Check the job completion status
-    $status = Check-JobCompletion -job $job
+    $status = Check-JobStatus -job $job
     if ($status -ne "Running") {
         break
     }
