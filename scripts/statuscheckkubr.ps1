@@ -30,24 +30,24 @@ function Check-JobStatus {
     # Check if the job is completed
     if ($status.conditions -and ($status.conditions | Where-Object { $_.type -eq "Complete" -and $_.status -eq "True" })) {
         Write-Output "Job has completed successfully."
-        return $true
+        return "Complete"
     }
 
-    # Check if the job has failed
+    # Check if the job has failed (backoff limit exceeded or retries exhausted)
     if ($status.conditions -and ($status.conditions | Where-Object { $_.type -eq "Failed" -and $_.status -eq "True" })) {
         Write-Output "Job has failed."
-        return $true
+        return "Failed"
     }
 
     # Check if the job is still running
     if ($status.active -gt 0) {
         Write-Output "Job is still running..."
-        return $false
+        return "Running"
     }
 
     # Default: Job is not active and no complete/failed condition found
     Write-Output "Unknown job status."
-    return $true
+    return "Unknown"
 }
 
 # Poll the job status until completion, failure, or timeout
@@ -56,13 +56,15 @@ while ($true) {
     $job = Get-JobStatus
 
     # Check the job status
-    if (Check-JobStatus -status $job.status) {
+    $status = Check-JobStatus -status $job.status
+    if ($status -ne "Running") {
         break
     }
 
     # Check timeout
     if ((Get-Date) -gt $startTime.AddSeconds($timeoutSeconds)) {
         Write-Output "Timeout reached. Stopping status checks."
+        $status = "Timeout"
         break
     }
 
@@ -70,4 +72,5 @@ while ($true) {
     Start-Sleep -Seconds $pollIntervalSeconds
 }
 
-Write-Output "Status check completed."
+# Output the final status
+Write-Output "Final Status: $status"
