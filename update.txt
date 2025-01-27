@@ -1,0 +1,1 @@
+="UPDATE " & B2 & " SET " & D2 & " = '" & E2 & "' WHERE " & C2 & " = 'SomeConditionValue';"
