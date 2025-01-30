@@ -1,0 +1,1 @@
+=IF(B2=0, "0 mins", INT(B2/86400) & " days " & INT(MOD(B2,86400)/3600) & " hours " & INT(MOD(B2,3600)/60) & " mins")
