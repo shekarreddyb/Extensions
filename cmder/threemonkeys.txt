@@ -1,0 +1,3 @@
+cmd -new_console:s50V
+powershell -new_console:s50H
+"C:\Program Files\Notepad++\notepad++.exe" -new_console:s50H
