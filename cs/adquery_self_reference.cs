@@ -8,10 +8,12 @@ class Program
 {
     static void Main()
     {
-        string domain = "LDAP://OU=YourOU,DC=yourdomain,DC=com"; // Change this to your OU
-        string outputFilePath = "GroupsList.txt"; // File to save the group names
+        string domainPath = "LDAP://OU=YourOU,DC=targetdomain,DC=com"; // Change to target domain OU
+        string username = "yourusername@targetdomain.com"; // Use a valid account in the target domain
+        string password = "yourpassword"; // Ensure this is secure (consider using secure storage)
+        string outputFilePath = "GroupsList.txt"; // Output file
 
-        List<string> groups = GetGroupsInOU(domain);
+        List<string> groups = GetGroupsInOU(domainPath, username, password);
 
         // Write groups to a text file
         File.WriteAllLines(outputFilePath, groups);
@@ -19,14 +21,14 @@ class Program
         Console.WriteLine($"Groups have been written to {outputFilePath}");
     }
 
-    static List<string> GetGroupsInOU(string ouPath)
+    static List<string> GetGroupsInOU(string ouPath, string username, string password)
     {
         List<string> groups = new();
-        DirectoryEntry entry = new(ouPath);
+        DirectoryEntry entry = new(ouPath, username, password); // Use explicit credentials
         DirectorySearcher searcher = new(entry)
         {
             Filter = "(objectClass=group)",
-            SearchScope = SearchScope.Subtree // Ensures it searches all nested OUs
+            SearchScope = SearchScope.Subtree // Search all nested OUs
         };
 
         searcher.PropertiesToLoad.Add("cn"); // Group name
