@@ -1,6 +1,17 @@
-// =====================
-// Domain Layer
-// =====================
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using MediatR;
+using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+#region Domain Layer
 
 namespace Domain.Entities
 {
@@ -12,7 +23,7 @@ namespace Domain.Entities
         public string Datacenter { get; set; }
         public string Environment { get; set; }
         public int AvailableCapacity { get; set; }
-        // For simplicity, assume each cluster knows its base URI.
+        // For simplicity, each cluster includes its base URI.
         public string BaseUri { get; set; }
     }
 }
@@ -20,61 +31,102 @@ namespace Domain.Entities
 namespace Domain.Interfaces
 {
     using Domain.Entities;
-    using System.Collections.Generic;
+    using Domain.Models;
     using System.Threading.Tasks;
+    using System.Collections.Generic;
 
-    // Abstraction to query clusters and database names.
+    // Abstraction to fetch clusters and query database names.
     public interface IClusterRepository
     {
         Task<IEnumerable<Cluster>> GetClustersByDatacenterAndEnvironmentAsync(string datacenter, string environment);
         Task<IEnumerable<string>> GetDatabaseNamesByClusterAsync(string clusterId, string appId, string lob, string environment, string datacenter);
     }
 
-    // Abstraction to provision a database on a cluster.
+    // Abstraction to provision a database (BDB or CRDB).
     public interface IDatabaseCreator
     {
-        Task<BdbResponse> CreateBdbAsync(string baseUri, object payload);
-        Task<CrdbResponse> CreateCrdbAsync(string baseUri, object payload);
+        Task<Infrastructure.Services.BdbResponse> CreateBdbAsync(string baseUri, object payload);
+        Task<Infrastructure.Services.CrdbResponse> CreateCrdbAsync(string baseUri, object payload);
+    }
+
+    // Abstraction for saving and retrieving the persisted database record.
+    public interface IRedisDatabaseRecordRepository
+    {
+        Task<DatabaseProvisioningResult> SaveDatabaseRecordAsync(DatabaseProvisioningResult record);
+        Task<DatabaseProvisioningResult> GetDatabaseRecordAsync(string guid);
     }
 }
 
 namespace Domain.Models
 {
-    // Domain model to represent the result of a provisioning request.
+    // Domain model for the provisioning result record.
     public class DatabaseProvisioningResult
     {
+        public string Guid { get; set; }
+        public string AppId { get; set; }
+        public string Lob { get; set; }
+        public DateTime CreatedOn { get; set; }
         public string TransactionId { get; set; }
-        public string DatabaseUid { get; set; }
-        public string DatabaseName { get; set; }
+        public string DbType { get; set; }  // "BDB" or "CRDB"
         public string ClusterName { get; set; }
-        public string? CrdbGuid { get; set; }
+        public string DbName { get; set; }
+        public bool IsCrdb { get; set; }
+        public string DatabaseUid { get; set; }
+        public string CrdbGuid { get; set; }
+        public TlsSettings TlsSettings { get; set; }
+    }
+}
+
+namespace Domain
+{
+    // Value object for TLS settings.
+    public class TlsSettings
+    {
+        public string OU { get; set; }
+        public string CN { get; set; }
+    }
+}
+
+namespace Domain
+{
+    // Generic Result wrapper (monad) for success/error handling.
+    public class Result<TSuccess, TError>
+    {
+        public TSuccess Success { get; }
+        public TError Error { get; }
+        public bool IsSuccess { get; }
+        private Result(TSuccess success) { Success = success; IsSuccess = true; }
+        private Result(TError error) { Error = error; IsSuccess = false; }
+        public static Result<TSuccess, TError> Ok(TSuccess success) => new Result<TSuccess, TError>(success);
+        public static Result<TSuccess, TError> Fail(TError error) => new Result<TSuccess, TError>(error);
     }
 }
 
 namespace Domain.Services
 {
-    using Domain.Entities;
     using Domain.Interfaces;
     using Domain.Models;
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
+    using Application.Commands;
     using System.Threading.Tasks;
 
-    // Domain service that encapsulates the business rules.
+    // Domain service that encapsulates business logic for provisioning.
     public class DatabaseProvisioningDomainService
     {
         private readonly IClusterRepository _clusterRepository;
         private readonly IDatabaseCreator _databaseCreator;
+        private readonly IRedisDatabaseRecordRepository _recordRepository;
 
-        public DatabaseProvisioningDomainService(IClusterRepository clusterRepository, IDatabaseCreator databaseCreator)
+        public DatabaseProvisioningDomainService(
+            IClusterRepository clusterRepository,
+            IDatabaseCreator databaseCreator,
+            IRedisDatabaseRecordRepository recordRepository)
         {
             _clusterRepository = clusterRepository;
             _databaseCreator = databaseCreator;
+            _recordRepository = recordRepository;
         }
 
-        // Core method: given a command, select clusters, form DB names, call Redis APIs, and return results.
-        public async Task<Result<List<DatabaseProvisioningResult>, List<string>>> ProvisionDatabasesAsync(Application.Commands.ProvisionDatabaseCommand command)
+        public async Task<Result<List<DatabaseProvisioningResult>, List<string>>> ProvisionDatabasesAsync(ProvisionDatabaseCommand command)
         {
             List<DatabaseProvisioningResult> results = new List<DatabaseProvisioningResult>();
             List<string> errors = new List<string>();
@@ -90,52 +142,54 @@ namespace Domain.Services
                     continue;
                 }
 
-                // 2. Pick the best cluster based on available capacity.
-                // (Also, if the app already has a DB in one of these clusters, you might select that one.)
+                // 2. Choose the best cluster based on available capacity.
                 var bestCluster = clusters.OrderByDescending(c => c.AvailableCapacity).First();
 
                 // 3. Form the base database name.
                 string baseDbName = $"{command.AppId}-{command.Lob}-{command.Environment}-{dc}";
                 // 4. Query existing database names to determine sequence number.
                 var existingNames = await _clusterRepository.GetDatabaseNamesByClusterAsync(bestCluster.ClusterId, command.AppId, command.Lob, command.Environment, dc);
-                int seq = 1;
-                if (existingNames.Any())
+                int seq = existingNames.Any() ? existingNames.Select(n =>
                 {
-                    // Assume names are in the format: baseName-seq.
-                    seq = existingNames.Select(n =>
-                    {
-                        var parts = n.Split('-');
-                        return int.TryParse(parts.Last(), out int number) ? number : 0;
-                    }).Max() + 1;
-                }
+                    var parts = n.Split('-');
+                    return int.TryParse(parts.Last(), out int number) ? number : 0;
+                }).Max() + 1 : 1;
                 string dbName = $"{baseDbName}-{seq}";
 
-                // 5. Call Redis API based on iscrdb flag.
+                // 5. Depending on IsCrdb flag, call the appropriate Redis API.
                 if (!command.IsCrdb)
                 {
-                    // Prepare payload for regular database creation (v1/bdbs).
                     var bdbPayload = new
                     {
                         name = dbName,
                         memory_size = command.MemorySize,
-                        port = 6379, // Example port.
+                        port = 6379,
                         replication = true,
                         aof_persistence = false,
                         tls_enabled = true,
-                        module = command.Module  // Only applicable when not CRDB.
+                        module = command.Module
                     };
 
-                    // Call the /v1/bdbs endpoint.
                     try
                     {
                         var bdbResponse = await _databaseCreator.CreateBdbAsync(bestCluster.BaseUri, bdbPayload);
-                        results.Add(new DatabaseProvisioningResult
+                        var record = new DatabaseProvisioningResult
                         {
+                            Guid = Guid.NewGuid().ToString(),
+                            AppId = command.AppId,
+                            Lob = command.Lob,
+                            CreatedOn = DateTime.UtcNow,
                             TransactionId = bdbResponse.transaction_id,
+                            DbType = "BDB",
+                            ClusterName = bestCluster.ClusterName,
+                            DbName = bdbResponse.name,
+                            IsCrdb = false,
                             DatabaseUid = bdbResponse.uid,
-                            DatabaseName = bdbResponse.name,
-                            ClusterName = bestCluster.ClusterName
-                        });
+                            CrdbGuid = null,
+                            TlsSettings = new TlsSettings { OU = command.TlsSettings.OU, CN = command.TlsSettings.CN }
+                        };
+                        var savedRecord = await _recordRepository.SaveDatabaseRecordAsync(record);
+                        results.Add(savedRecord);
                     }
                     catch (Exception ex)
                     {
@@ -144,30 +198,37 @@ namespace Domain.Services
                 }
                 else
                 {
-                    // CRDB case:
-                    // Gather all clusters in the datacenter to include as instances.
+                    // For CRDB, gather instance cluster IDs.
                     var clustersInDc = clusters.ToList();
                     var instanceClusterIds = clustersInDc.Select(c => c.ClusterId).ToList();
                     var crdbPayload = new
                     {
                         name = dbName,
                         regions = instanceClusterIds,
-                        port = 6380, // Example port for CRDB.
+                        port = 6380,
                         replication = true
                     };
 
-                    // Call the /v1/crdbs endpoint.
                     try
                     {
                         var crdbResponse = await _databaseCreator.CreateCrdbAsync(bestCluster.BaseUri, crdbPayload);
-                        results.Add(new DatabaseProvisioningResult
+                        var record = new DatabaseProvisioningResult
                         {
+                            Guid = Guid.NewGuid().ToString(),
+                            AppId = command.AppId,
+                            Lob = command.Lob,
+                            CreatedOn = DateTime.UtcNow,
                             TransactionId = crdbResponse.transaction_id,
-                            DatabaseUid = crdbResponse.uid,
-                            DatabaseName = crdbResponse.name,
+                            DbType = "CRDB",
                             ClusterName = bestCluster.ClusterName,
-                            CrdbGuid = crdbResponse.crdb_guid
-                        });
+                            DbName = crdbResponse.name,
+                            IsCrdb = true,
+                            DatabaseUid = crdbResponse.uid,
+                            CrdbGuid = crdbResponse.crdb_guid,
+                            TlsSettings = new TlsSettings { OU = command.TlsSettings.OU, CN = command.TlsSettings.CN }
+                        };
+                        var savedRecord = await _recordRepository.SaveDatabaseRecordAsync(record);
+                        results.Add(savedRecord);
                     }
                     catch (Exception ex)
                     {
@@ -184,106 +245,148 @@ namespace Domain.Services
     }
 }
 
-namespace Domain // Simple Result monad
-{
-    public class Result<TSuccess, TError>
-    {
-        public TSuccess? Success { get; }
-        public TError? Error { get; }
-        public bool IsSuccess { get; }
-        private Result(TSuccess success) { Success = success; IsSuccess = true; }
-        private Result(TError error) { Error = error; IsSuccess = false; }
-        public static Result<TSuccess, TError> Ok(TSuccess success) => new(success);
-        public static Result<TSuccess, TError> Fail(TError error) => new(error);
-    }
-}
+#endregion
 
-// =====================
-// Application Layer
-// =====================
+#region Application Layer
 
 namespace Application.Commands
 {
     using MediatR;
     using System.Collections.Generic;
+    using Domain;
 
-    // This combined command acts as both the API input DTO and the MediatR command.
-    public class ProvisionDatabaseCommand : IRequest<Result<ProvisionDatabaseResponse, List<string>>>
+    // Combined DTO/command for provisioning a database.
+    public class ProvisionDatabaseCommand : IRequest<Domain.Result<ProvisionDatabaseResponse, List<string>>>
     {
         public string AppId { get; set; }
         public string Lob { get; set; }
         public string Environment { get; set; }
         public List<string> DatacentersList { get; set; }
         public bool IsCrdb { get; set; }
-        public string Module { get; set; }  // Used only if IsCrdb is false.
+        public string Module { get; set; }  // Only used if IsCrdb is false.
         public int MemorySize { get; set; }
         public TlsSettings TlsSettings { get; set; }
     }
 
-    public class TlsSettings
-    {
-        public string OU { get; set; }
-        public string CN { get; set; }
-    }
-
-    // Response DTO returned from the application.
+    // API response that will be returned.
     public class ProvisionDatabaseResponse
     {
         public string AppId { get; set; }
         public string Lob { get; set; }
-        public System.DateTime CreatedOn { get; set; }
+        public DateTime CreatedOn { get; set; }
         public string TransactionId { get; set; }
-        public string DbType { get; set; }  // "BDB" or "CRDB"
+        public string DbType { get; set; }
         public string ClusterName { get; set; }
         public string DbName { get; set; }
         public bool IsCrdb { get; set; }
         public string DatabaseUid { get; set; }
-        public string? CrdbGuid { get; set; }
+        public string CrdbGuid { get; set; }
+        public TlsSettings TlsSettings { get; set; }
+    }
+}
+
+namespace Application.Validators
+{
+    using FluentValidation;
+    using Application.Commands;
+
+    // FluentValidation rules on the combined command.
+    public class ProvisionDatabaseCommandValidator : AbstractValidator<ProvisionDatabaseCommand>
+    {
+        public ProvisionDatabaseCommandValidator()
+        {
+            RuleFor(x => x.AppId).NotEmpty().WithMessage("AppId is required.");
+            RuleFor(x => x.Lob).NotEmpty().WithMessage("LOB is required.");
+            RuleFor(x => x.DatacentersList).NotEmpty().WithMessage("At least one datacenter is required.");
+            RuleFor(x => x.Environment).NotEmpty().WithMessage("Environment is required.");
+            RuleFor(x => x.MemorySize).GreaterThan(0).WithMessage("MemorySize must be greater than zero.");
+            RuleFor(x => x.Module).NotEmpty().When(x => !x.IsCrdb).WithMessage("Module is required when IsCrdb is false.");
+            RuleFor(x => x.TlsSettings).NotNull().WithMessage("TLS settings are required.")
+                .DependentRules(() =>
+                {
+                    RuleFor(x => x.TlsSettings.OU).NotEmpty().WithMessage("OU is required.");
+                    RuleFor(x => x.TlsSettings.CN).NotEmpty().WithMessage("CN is required.");
+                });
+        }
+    }
+}
+
+namespace Application.Behaviors
+{
+    using FluentValidation;
+    using MediatR;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Domain;
+
+    // Pipeline behavior that validates the command before handling.
+    public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+        where TRequest : IRequest<TResponse>
+    {
+        private readonly IEnumerable<IValidator<TRequest>> _validators;
+        public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
+        {
+            _validators = validators;
+        }
+        public async Task<TResponse> Handle(TRequest request, CancellationToken cancellationToken, RequestHandlerDelegate<TResponse> next)
+        {
+            if (_validators.Any())
+            {
+                var context = new ValidationContext<TRequest>(request);
+                var results = await Task.WhenAll(_validators.Select(v => v.ValidateAsync(context, cancellationToken)));
+                var failures = results.SelectMany(r => r.Errors).Where(f => f != null).ToList();
+                if (failures.Any())
+                {
+                    object response = Domain.Result<ProvisionDatabaseResponse, List<string>>.Fail(
+                        failures.Select(f => f.ErrorMessage).ToList());
+                    return (TResponse)response;
+                }
+            }
+            return await next();
+        }
     }
 }
 
 namespace Application.Handlers
 {
     using MediatR;
-    using Domain.Services;
     using Application.Commands;
-    using Domain.Models;
+    using Domain.Services;
+    using Domain;
     using System.Threading;
     using System.Threading.Tasks;
-    using System.Collections.Generic;
     using System.Linq;
+    using System.Collections.Generic;
 
-    // This MediatR handler orchestrates the command by calling into the domain service.
-    public class ProvisionDatabaseCommandHandler : IRequestHandler<ProvisionDatabaseCommand, Result<ProvisionDatabaseResponse, List<string>>>
+    // MediatR handler that calls the domain service and maps results to the API response.
+    public class ProvisionDatabaseCommandHandler : IRequestHandler<ProvisionDatabaseCommand, Domain.Result<ProvisionDatabaseResponse, List<string>>>
     {
         private readonly DatabaseProvisioningDomainService _domainService;
         public ProvisionDatabaseCommandHandler(DatabaseProvisioningDomainService domainService)
         {
             _domainService = domainService;
         }
-        public async Task<Result<ProvisionDatabaseResponse, List<string>>> Handle(ProvisionDatabaseCommand command, CancellationToken cancellationToken)
+        public async Task<Domain.Result<ProvisionDatabaseResponse, List<string>>> Handle(ProvisionDatabaseCommand command, CancellationToken cancellationToken)
         {
-            // Call the domain service.
             var domainResult = await _domainService.ProvisionDatabasesAsync(command);
-
-            // Map the domain result(s) into a response DTO.
             if (domainResult.IsSuccess)
             {
-                // For simplicity, assume one result per datacenter; here we join them into one response.
-                // In a real-world scenario, you might return a list or a more complex object.
                 var first = domainResult.Success.First();
-                var response = new Application.Commands.ProvisionDatabaseResponse
+                var response = new ProvisionDatabaseResponse
                 {
                     AppId = command.AppId,
                     Lob = command.Lob,
-                    CreatedOn = System.DateTime.UtcNow,
+                    CreatedOn = DateTime.UtcNow,
                     TransactionId = first.TransactionId,
                     DbType = command.IsCrdb ? "CRDB" : "BDB",
                     ClusterName = first.ClusterName,
-                    DbName = first.DatabaseName,
+                    DbName = first.DbName,
                     IsCrdb = command.IsCrdb,
                     DatabaseUid = first.DatabaseUid,
-                    CrdbGuid = first.CrdbGuid
+                    CrdbGuid = first.CrdbGuid,
+                    TlsSettings = new TlsSettings { OU = command.TlsSettings.OU, CN = command.TlsSettings.CN }
                 };
                 return Domain.Result<ProvisionDatabaseResponse, List<string>>.Ok(response);
             }
@@ -292,25 +395,23 @@ namespace Application.Handlers
     }
 }
 
-// =====================
-// Infrastructure Layer
-// =====================
+#endregion
+
+#region Infrastructure Layer
 
 namespace Infrastructure.Repositories
 {
-    using Domain.Entities;
     using Domain.Interfaces;
+    using Domain.Entities;
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
 
-    // A sample/fake implementation of IClusterRepository.
+    // A dummy implementation that returns sample clusters and database names.
     public class ClusterRepository : IClusterRepository
     {
-        // In a real implementation, use HttpClient or a database.
         public async Task<IEnumerable<Cluster>> GetClustersByDatacenterAndEnvironmentAsync(string datacenter, string environment)
         {
-            // Return some dummy clusters.
             return await Task.FromResult(new List<Cluster>
             {
                 new Cluster
@@ -336,8 +437,6 @@ namespace Infrastructure.Repositories
 
         public async Task<IEnumerable<string>> GetDatabaseNamesByClusterAsync(string clusterId, string appId, string lob, string environment, string datacenter)
         {
-            // Return a dummy list simulating that a database "myapp-fin-prod-dc1-1" already exists.
-            // In a real implementation, call an API or query a database.
             if (clusterId == "cluster-001")
                 return await Task.FromResult(new List<string> { $"{appId}-{lob}-{environment}-{datacenter}-1" });
             return await Task.FromResult(new List<string>());
@@ -348,12 +447,11 @@ namespace Infrastructure.Repositories
 namespace Infrastructure.Services
 {
     using Domain.Interfaces;
-    using Domain.Models;
     using System.Net.Http;
     using System.Net.Http.Json;
     using System.Threading.Tasks;
 
-    // A concrete implementation of IDatabaseCreator that uses HttpClient.
+    // Concrete implementation for calling the external Redis API.
     public class RedisDatabaseCreator : IDatabaseCreator
     {
         private readonly HttpClient _httpClient;
@@ -361,25 +459,21 @@ namespace Infrastructure.Services
         {
             _httpClient = httpClient;
         }
-
-        public async Task<BdbResponse> CreateBdbAsync(string baseUri, object payload)
+        public async Task<Services.BdbResponse> CreateBdbAsync(string baseUri, object payload)
         {
-            // Call the v1/bdbs endpoint.
             var response = await _httpClient.PostAsJsonAsync($"{baseUri}/v1/bdbs", payload);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<BdbResponse>();
+            return await response.Content.ReadFromJsonAsync<Services.BdbResponse>();
         }
-
-        public async Task<CrdbResponse> CreateCrdbAsync(string baseUri, object payload)
+        public async Task<Services.CrdbResponse> CreateCrdbAsync(string baseUri, object payload)
         {
-            // Call the v1/crdbs endpoint.
             var response = await _httpClient.PostAsJsonAsync($"{baseUri}/v1/crdbs", payload);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<CrdbResponse>();
+            return await response.Content.ReadFromJsonAsync<Services.CrdbResponse>();
         }
     }
 
-    // Response models that match the external Redis API.
+    // Models matching the external API responses.
     public class BdbResponse
     {
         public string uid { get; set; }
@@ -388,7 +482,6 @@ namespace Infrastructure.Services
         public int memory_size { get; set; }
         public string status { get; set; }
         public string transaction_id { get; set; }
-        // ... other fields as needed.
     }
 
     public class CrdbResponse
@@ -397,13 +490,38 @@ namespace Infrastructure.Services
         public string name { get; set; }
         public string uid { get; set; }
         public string transaction_id { get; set; }
-        // ... other fields as needed.
     }
 }
 
-// =====================
-// Presentation Layer (API Controller)
-// =====================
+namespace Infrastructure.Repositories
+{
+    using Domain.Interfaces;
+    using Domain.Models;
+    using System.Collections.Concurrent;
+    using System.Threading.Tasks;
+
+    // Simple in-memory repository for persisting database records.
+    public class InMemoryRedisDatabaseRecordRepository : IRedisDatabaseRecordRepository
+    {
+        private readonly ConcurrentDictionary<string, DatabaseProvisioningResult> _store = new ConcurrentDictionary<string, DatabaseProvisioningResult>();
+
+        public async Task<DatabaseProvisioningResult> SaveDatabaseRecordAsync(DatabaseProvisioningResult record)
+        {
+            _store[record.Guid] = record;
+            return await Task.FromResult(record);
+        }
+
+        public async Task<DatabaseProvisioningResult> GetDatabaseRecordAsync(string guid)
+        {
+            _store.TryGetValue(guid, out var record);
+            return await Task.FromResult(record);
+        }
+    }
+}
+
+#endregion
+
+#region Presentation Layer
 
 namespace Presentation.Controllers
 {
@@ -411,7 +529,6 @@ namespace Presentation.Controllers
     using MediatR;
     using Microsoft.AspNetCore.Mvc;
     using System.Threading.Tasks;
-    using System.Collections.Generic;
 
     [ApiController]
     [Route("api/[controller]")]
@@ -431,5 +548,99 @@ namespace Presentation.Controllers
                 return Ok(result.Success);
             return BadRequest(result.Error);
         }
+
+        // GET endpoint for retrieving all records.
+        [HttpGet]
+        public async Task<IActionResult> GetAllRecords()
+        {
+            // For demonstration, return dummy data.
+            return Ok(new[] { "Record1", "Record2" });
+        }
+
+        // DELETE endpoint to remove a record by its GUID.
+        [HttpDelete("{guid}")]
+        public async Task<IActionResult> DeleteRecord(string guid)
+        {
+            // In a real app, call an application service to delete.
+            return Ok(new { message = $"Database record with guid '{guid}' deleted successfully." });
+        }
+
+        // PATCH endpoint to update a record.
+        [HttpPatch("{guid}")]
+        public async Task<IActionResult> UpdateRecord(string guid, [FromBody] ProvisionDatabaseCommand command)
+        {
+            // For simplicity, we return the command as the updated record.
+            return Ok(new
+            {
+                message = "Database record updated successfully.",
+                updatedRecord = command
+            });
+        }
+
+        // Search endpoint.
+        [HttpGet("search")]
+        public async Task<IActionResult> SearchRecords([FromQuery] SearchRedisRecordsQuery query)
+        {
+            var result = await _mediator.Send(query);
+            if (result.IsSuccess)
+                return Ok(result.Success);
+            return BadRequest(result.Error);
+        }
+    }
+
+    // MediatR query for searching records.
+    public class SearchRedisRecordsQuery : IRequest<Domain.Result<System.Collections.Generic.List<ProvisionDatabaseResponse>, string>>
+    {
+        public string AppId { get; set; }
+        public string Lob { get; set; }
+        public string TransactionId { get; set; }
     }
 }
+
+namespace Application.Handlers
+{
+    using MediatR;
+    using Application.Commands;
+    using Domain.Interfaces;
+    using Domain;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using System.Collections.Generic;
+    using System.Linq;
+
+    // Handler for the search query.
+    public class SearchRedisRecordsQueryHandler : IRequestHandler<SearchRedisRecordsQuery, Domain.Result<List<ProvisionDatabaseResponse>, string>>
+    {
+        private readonly IRedisDatabaseRecordRepository _repository;
+        public SearchRedisRecordsQueryHandler(IRedisDatabaseRecordRepository repository)
+        {
+            _repository = repository;
+        }
+        public async Task<Domain.Result<List<ProvisionDatabaseResponse>, string>> Handle(SearchRedisRecordsQuery query, CancellationToken cancellationToken)
+        {
+            // Dummy implementation; in a real app, search the persisted records.
+            var records = new List<ProvisionDatabaseResponse>
+            {
+                new ProvisionDatabaseResponse
+                {
+                    AppId = query.AppId,
+                    Lob = query.Lob,
+                    CreatedOn = System.DateTime.UtcNow,
+                    TransactionId = query.TransactionId,
+                    DbType = "BDB",
+                    ClusterName = "dc1-ClusterA",
+                    DbName = $"{query.AppId}-{query.Lob}-prod-dc1-1",
+                    IsCrdb = false,
+                    DatabaseUid = "BDB-12345",
+                    CrdbGuid = null,
+                    TlsSettings = new Domain.TlsSettings { OU = "OrgUnitA", CN = "CommonNameA" }
+                }
+            };
+            if (records.Any())
+                return Domain.Result<List<ProvisionDatabaseResponse>, string>.Ok(records);
+            return Domain.Result<List<ProvisionDatabaseResponse>, string>.Fail("No matching records found.");
+        }
+    }
+}
+
+#endregion
