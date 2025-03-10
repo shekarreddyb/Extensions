@@ -1,0 +1,551 @@
+openapi: 3.0.0
+info:
+  title: Redis Provisioning API
+  version: "1.0.0"
+
+servers:
+  - url: https://api.example.com
+
+paths:
+
+  #######################################################
+  # 1. LOGICAL DATABASE ENDPOINTS
+  #######################################################
+  /redis/logical-databases:
+    post:
+      summary: Create a new logical database (spanning multiple DCs)
+      description: >
+        Creates a new logical database resource, potentially provisioning one or more
+        physical databases in different data centers. Returns a requestId for async tracking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLogicalDatabaseRequest'
+      responses:
+        '201':
+          description: Request accepted, creation in progress.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateLogicalDatabaseResponse'
+
+    get:
+      summary: (Optional) List all logical databases
+      description: >
+        Returns a paginated list of logical databases.
+        Adjust as needed for your use case.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          required: false
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          required: false
+      responses:
+        '200':
+          description: A list of logical databases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogicalDatabaseSummary'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /redis/logical-databases/{logicalDatabaseId}:
+    get:
+      summary: Get logical database details
+      description: >
+        Retrieves the consolidated view of one logical database, including
+        its physical databases across multiple DCs.
+      parameters:
+        - name: logicalDatabaseId
+          in: path
+          required: true
+          description: Logical database identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogicalDatabaseDetails'
+        '404':
+          description: Not Found
+
+    put:
+      summary: Update a logical database
+      description: >
+        Update config at the logical level. Depending on your design, this might
+        let the caller modify multiple DCs at once or add new DCs.
+      parameters:
+        - name: logicalDatabaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLogicalDatabaseRequest'
+      responses:
+        '202':
+          description: Update request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateLogicalDatabaseResponse'
+        '404':
+          description: Not Found
+
+    delete:
+      summary: Delete a logical database
+      description: >
+        Deletes the logical database and all underlying physical databases (if any).
+      parameters:
+        - name: logicalDatabaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Deletion request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteLogicalDatabaseResponse'
+        '404':
+          description: Not Found
+
+  #######################################################
+  # 2. PHYSICAL DATABASE ENDPOINTS (Optional)
+  #######################################################
+  /redis/databases:
+    get:
+      summary: (Optional) List all physical databases
+      description: For advanced use cases. Allows direct viewing of all DB instances.
+      parameters:
+        - name: dc
+          in: query
+          schema:
+            type: string
+          required: false
+          description: Filter by data center
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhysicalDatabaseSummary'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /redis/databases/{databaseId}:
+    get:
+      summary: Get a single physical database
+      description: >
+        Retrieve details about one physical database instance in a particular DC.
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalDatabaseDetails'
+        '404':
+          description: Not Found
+
+    put:
+      summary: Update a single physical database
+      description: >
+        Directly update a single physical DB's config (size, replication, etc.).
+        This returns a requestId for async tracking.
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePhysicalDatabaseRequest'
+      responses:
+        '202':
+          description: Update request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatePhysicalDatabaseResponse'
+        '404':
+          description: Not Found
+
+    delete:
+      summary: Delete a single physical database
+      description: >
+        Removes one physical instance from its data center.
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Deletion request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletePhysicalDatabaseResponse'
+        '404':
+          description: Not Found
+
+  #######################################################
+  # 3. REQUESTS ENDPOINTS (For Asynchronous Tracking)
+  #######################################################
+  /redis/requests/{requestId}:
+    get:
+      summary: Get request status
+      description: >
+        Retrieves the status (IN_PROGRESS, COMPLETED, PARTIAL_SUCCESS, FAILED) of
+        a provisioning/update/delete request, possibly including per-DC results.
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestStatus'
+        '404':
+          description: Not Found
+
+
+components:
+
+  schemas:
+
+    #######################################################
+    # SCHEMAS FOR LOGICAL DATABASE
+    #######################################################
+    CreateLogicalDatabaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "my-app-redis-dev"
+        environment:
+          type: string
+          example: "dev"
+        datacenters:
+          type: array
+          description: "List of DCs to provision. Each item can specify DC-level config."
+          items:
+            $ref: '#/components/schemas/DataCenterSpec'
+        additionalConfig:
+          type: object
+          additionalProperties: true
+          description: "Optional dictionary of additional config."
+      required:
+        - name
+        - environment
+        - datacenters
+
+    CreateLogicalDatabaseResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "abc-123"
+        logicalDatabaseId:
+          type: string
+          example: "ld-7777"
+        message:
+          type: string
+          example: "Request accepted. Track status using requestId=abc-123"
+
+    UpdateLogicalDatabaseRequest:
+      type: object
+      properties:
+        # This can vary based on how you want to handle updates:
+        datacenters:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataCenterUpdateSpec'
+        # Or maybe global changes at the logical level
+        additionalConfig:
+          type: object
+          additionalProperties: true
+      required: []
+
+    UpdateLogicalDatabaseResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "xyz-456"
+        message:
+          type: string
+          example: "Update request accepted"
+
+    DeleteLogicalDatabaseResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "del-789"
+        message:
+          type: string
+          example: "Deletion request accepted"
+
+    # Returned by GET /redis/logical-databases/{logicalDatabaseId}
+    LogicalDatabaseDetails:
+      type: object
+      properties:
+        logicalDatabaseId:
+          type: string
+          example: "ld-7777"
+        name:
+          type: string
+          example: "my-app-redis-dev"
+        environment:
+          type: string
+          example: "dev"
+        status:
+          type: string
+          example: "PARTIAL_SUCCESS"
+        createdTime:
+          type: string
+          format: date-time
+        updatedTime:
+          type: string
+          format: date-time
+        additionalConfig:
+          type: object
+          additionalProperties: true
+        physicalDatabases:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhysicalDatabaseSummary'
+
+    # Used in a list view: GET /redis/logical-databases
+    LogicalDatabaseSummary:
+      type: object
+      properties:
+        logicalDatabaseId:
+          type: string
+        name:
+          type: string
+        environment:
+          type: string
+        status:
+          type: string
+        createdTime:
+          type: string
+          format: date-time
+
+    #######################################################
+    # SCHEMAS FOR PHYSICAL DATABASE
+    #######################################################
+    DataCenterSpec:
+      type: object
+      properties:
+        dc:
+          type: string
+          example: "EastDC"
+        size:
+          type: string
+          example: "small"
+        replication:
+          type: boolean
+        additionalConfig:
+          type: object
+          additionalProperties: true
+
+    DataCenterUpdateSpec:
+      type: object
+      properties:
+        databaseId:
+          type: string
+          description: "If updating an existing physical DB"
+        dc:
+          type: string
+          description: "If adding a new DC or referencing an existing one"
+        size:
+          type: string
+        replication:
+          type: boolean
+        additionalConfig:
+          type: object
+          additionalProperties: true
+
+    PhysicalDatabaseSummary:
+      type: object
+      properties:
+        databaseId:
+          type: string
+          example: "db-east-111"
+        logicalDatabaseId:
+          type: string
+          example: "ld-7777"
+        dc:
+          type: string
+          example: "EastDC"
+        status:
+          type: string
+          example: "ACTIVE"
+
+    PhysicalDatabaseDetails:
+      type: object
+      properties:
+        databaseId:
+          type: string
+          example: "db-east-111"
+        logicalDatabaseId:
+          type: string
+          example: "ld-7777"
+        dc:
+          type: string
+        clusterId:
+          type: string
+          example: "cluster-east-dev-001"
+        status:
+          type: string
+          example: "ACTIVE"
+        size:
+          type: string
+          example: "small"
+        replication:
+          type: boolean
+        createdTime:
+          type: string
+          format: date-time
+        updatedTime:
+          type: string
+          format: date-time
+        additionalConfig:
+          type: object
+          additionalProperties: true
+
+    UpdatePhysicalDatabaseRequest:
+      type: object
+      properties:
+        size:
+          type: string
+          example: "medium"
+        replication:
+          type: boolean
+        additionalConfig:
+          type: object
+          additionalProperties: true
+
+    UpdatePhysicalDatabaseResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "update-321"
+        message:
+          type: string
+          example: "Update request accepted"
+
+    DeletePhysicalDatabaseResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "del-654"
+        message:
+          type: string
+          example: "Deletion request accepted"
+
+    #######################################################
+    # SCHEMAS FOR REQUEST TRACKING
+    #######################################################
+    RequestStatus:
+      type: object
+      properties:
+        requestId:
+          type: string
+          example: "abc-123"
+        type:
+          type: string
+          example: "CREATE"
+        status:
+          type: string
+          example: "PARTIAL_SUCCESS"
+        message:
+          type: string
+          example: "EastDC succeeded, WestDC failed"
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        results:
+          type: array
+          description: "Detailed per-DC (or per-database) outcomes."
+          items:
+            $ref: '#/components/schemas/RequestResult'
+
+    RequestResult:
+      type: object
+      properties:
+        dc:
+          type: string
+          example: "EastDC"
+        databaseId:
+          type: string
+          nullable: true
+          example: "db-east-111"
+        status:
+          type: string
+          example: "SUCCESS"
+        message:
+          type: string
+          example: "Provisioned successfully."
