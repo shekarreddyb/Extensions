@@ -1,0 +1,356 @@
+openapi: 3.0.0
+info:
+  title: Redis Provisioning API
+  version: "1.0.0"
+
+servers:
+  - url: https://api.example.com
+
+paths:
+
+  #######################################################
+  # 1. DATABASE RESOURCE
+  #######################################################
+  /redis/databases:
+    post:
+      summary: Create a new database (potentially in multiple DCs)
+      description: >
+        Creates a new database resource.  
+        Internally, this may involve provisioning multiple physical DBs across the listed DCs.  
+        Returns a transactionId with initial status=PENDING.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatabaseRequest'
+      responses:
+        "202":
+          description: Acknowledgment with transactionId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAck'
+      # 200 or 201 are also acceptable. 202 is common for async.
+
+    get:
+      summary: (Optional) List all databases
+      description: >
+        Returns a list (or page) of database resources as currently known.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of databases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DatabaseSummary'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /redis/databases/{databaseId}:
+    get:
+      summary: Get database details
+      description: >
+        Retrieves the full definition of a database, including all data centers.
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Database details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseDetails'
+        "404":
+          description: Database not found
+
+    put:
+      summary: Update an existing database
+      description: >
+        Replaces the entire definition of a database.  
+        - If the new definition omits a DC that previously existed, that DC is deleted.  
+        - If the new definition adds a DC, it is provisioned.  
+        - If it changes a DC's properties, that DC is updated.  
+        Returns a transactionId (PENDING).  
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDatabaseRequest'
+      responses:
+        "202":
+          description: Update request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAck'
+        "404":
+          description: Database not found
+
+    delete:
+      summary: Delete a database
+      description: >
+        Deletes the database and any underlying data-center instances.  
+        Returns a transactionId (PENDING).
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Deletion request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAck'
+        "404":
+          description: Database not found
+
+  #######################################################
+  # 2. TRANSACTION ENDPOINT
+  #######################################################
+  /redis/transactions/{transactionId}:
+    get:
+      summary: Check the status of an asynchronous transaction
+      description: >
+        Returns the current status of a create, update, or delete request.
+        May show partial success/failure across data centers.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionStatus'
+        "404":
+          description: Transaction not found
+
+components:
+
+  schemas:
+    #######################################################
+    # 1. DATABASE SCHEMAS
+    #######################################################
+    CreateDatabaseRequest:
+      type: object
+      description: Payload for creating a new database resource.
+      properties:
+        name:
+          type: string
+          example: "my-app-redis"
+        environment:
+          type: string
+          example: "dev"
+        datacenters:
+          type: array
+          description: "List of DC configurations."
+          items:
+            $ref: '#/components/schemas/DataCenterConfig'
+      required:
+        - name
+        - environment
+        - datacenters
+
+    UpdateDatabaseRequest:
+      type: object
+      description: Full replacement of the database resource definition.
+      properties:
+        name:
+          type: string
+          example: "my-app-redis"
+        environment:
+          type: string
+          example: "dev"
+        datacenters:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataCenterConfig'
+      required:
+        - datacenters
+      # In a true REST "PUT", you might also require name/environment to be repeated if they're part of the resource.
+
+    DataCenterConfig:
+      type: object
+      properties:
+        dc:
+          type: string
+          example: "EastDC"
+        size:
+          type: string
+          example: "small"
+        replication:
+          type: boolean
+          example: false
+        # You can extend with additional config
+      required:
+        - dc
+
+    DatabaseSummary:
+      type: object
+      description: Summary info for listing multiple DBs
+      properties:
+        databaseId:
+          type: string
+          example: "db-9999"
+        name:
+          type: string
+          example: "my-app-redis"
+        environment:
+          type: string
+          example: "dev"
+        status:
+          type: string
+          example: "ACTIVE"
+        createdTime:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:00:00Z"
+
+    DatabaseDetails:
+      type: object
+      description: Full details of a single database resource, including DCs.
+      properties:
+        databaseId:
+          type: string
+          example: "db-9999"
+        name:
+          type: string
+          example: "my-app-redis"
+        environment:
+          type: string
+          example: "dev"
+        status:
+          type: string
+          example: "PARTIAL_SUCCESS"
+        createdTime:
+          type: string
+          format: date-time
+        updatedTime:
+          type: string
+          format: date-time
+        datacenters:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhysicalDBDetails'
+
+    PhysicalDBDetails:
+      type: object
+      description: One DC’s instance for this database
+      properties:
+        dc:
+          type: string
+          example: "EastDC"
+        size:
+          type: string
+          example: "small"
+        replication:
+          type: boolean
+        status:
+          type: string
+          example: "ACTIVE"
+        # Possibly clusterId, or other DC-specific fields
+        lastUpdated:
+          type: string
+          format: date-time
+
+    #######################################################
+    # 2. TRANSACTION SCHEMAS
+    #######################################################
+    TransactionAck:
+      type: object
+      description: Immediate response for async operations
+      properties:
+        transactionId:
+          type: string
+          example: "tx-abc123"
+        status:
+          type: string
+          example: "PENDING"
+        message:
+          type: string
+          example: "Request accepted. Track status with transactionId=tx-abc123"
+
+    TransactionStatus:
+      type: object
+      description: Status of a create/update/delete operation
+      properties:
+        transactionId:
+          type: string
+          example: "tx-abc123"
+        operation:
+          type: string
+          description: "CREATE, UPDATE, or DELETE"
+          example: "CREATE"
+        status:
+          type: string
+          description: "Overall transaction status"
+          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED, PARTIAL_SUCCESS]
+          example: "PARTIAL_SUCCESS"
+        databaseId:
+          type: string
+          description: "The main databaseId that was created/updated/deleted."
+          example: "db-9999"
+        message:
+          type: string
+          description: "Overall success or error message."
+          example: "EastDC updated, WestDC failed due to capacity."
+        startTime:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:12:34Z"
+        endTime:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:14:22Z"
+        results:
+          type: array
+          description: "Optional details per DC for partial success/failure."
+          items:
+            type: object
+            properties:
+              dc:
+                type: string
+                example: "EastDC"
+              status:
+                type: string
+                example: "SUCCESS"
+              message:
+                type: string
+                example: "Provisioned successfully."
