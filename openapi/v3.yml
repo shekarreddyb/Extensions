@@ -12,6 +12,71 @@ paths:
   # 1. DATABASE RESOURCE
   #######################################################
   /redis/databases:
+    get:
+      summary: List or search databases
+      description: >
+        Retrieves a paginated list of databases.  
+        - If no query parameters are provided, returns all databases (subject to pagination).  
+        - If `name`, `environment`, or `dc` query params are provided, the server applies filters accordingly.  
+      parameters:
+        - name: name
+          in: query
+          description: "Filter by database name (exact or partial match, as implemented by the server)."
+          required: false
+          schema:
+            type: string
+        - name: environment
+          in: query
+          description: "Filter by environment (e.g. dev, test, prod)."
+          required: false
+          schema:
+            type: string
+        - name: dc
+          in: query
+          description: >
+            One or more data center names to filter by.
+            May be repeated (e.g. `?dc=EastDC&dc=WestDC`) or comma-separated (implementation detail).
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+            style: form
+            explode: true
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          required: false
+          description: "Page number for pagination."
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          required: false
+          description: "Page size for pagination."
+
+      responses:
+        "200":
+          description: A list of matching databases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DatabaseSummary'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
     post:
       summary: Create a new database (potentially in multiple DCs)
       description: >
@@ -31,39 +96,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionAck'
-      # 200 or 201 are also acceptable. 202 is common for async.
-
-    get:
-      summary: (Optional) List all databases
-      description: >
-        Returns a list (or page) of database resources as currently known.
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-        - name: pageSize
-          in: query
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: List of databases
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/DatabaseSummary'
-                  page:
-                    type: integer
-                  pageSize:
-                    type: integer
-                  totalItems:
-                    type: integer
 
   /redis/databases/{databaseId}:
     get:
@@ -93,7 +125,7 @@ paths:
         - If the new definition omits a DC that previously existed, that DC is deleted.  
         - If the new definition adds a DC, it is provisioned.  
         - If it changes a DC's properties, that DC is updated.  
-        Returns a transactionId (PENDING).  
+        Returns a transactionId (PENDING).
       parameters:
         - name: databaseId
           in: path
@@ -204,7 +236,7 @@ components:
             $ref: '#/components/schemas/DataCenterConfig'
       required:
         - datacenters
-      # In a true REST "PUT", you might also require name/environment to be repeated if they're part of the resource.
+      # In a pure REST "PUT", you might also require 'name' and 'environment' every time if those remain part of the resource.
 
     DataCenterConfig:
       type: object
@@ -218,13 +250,12 @@ components:
         replication:
           type: boolean
           example: false
-        # You can extend with additional config
       required:
         - dc
 
     DatabaseSummary:
       type: object
-      description: Summary info for listing multiple DBs
+      description: Summary info for listing or searching
       properties:
         databaseId:
           type: string
@@ -285,7 +316,6 @@ components:
         status:
           type: string
           example: "ACTIVE"
-        # Possibly clusterId, or other DC-specific fields
         lastUpdated:
           type: string
           format: date-time
