@@ -1,0 +1,229 @@
+openapi: 3.0.0
+info:
+  title: Redis Provisioning API
+  version: "1.0.0"
+
+servers:
+  - url: https://api.example.com
+
+paths:
+  /redis/logical-databases:
+    post:
+      summary: Create a new logical database
+      description: >
+        Creates a new logical database resource (potentially across multiple DCs).
+        Returns a transactionId with a status=Pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLogicalDatabaseRequest'
+      responses:
+        "202":
+          description: Acknowledgment with transactionId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+
+  /redis/logical-databases/{logicalDatabaseId}:
+    put:
+      summary: Update an existing logical database
+      description: >
+        Updates configuration for a logical database (potentially across multiple DCs).
+        Returns a transactionId with status=Pending. Final success/failure available via GET /transactions/{transactionId}.
+      parameters:
+        - name: logicalDatabaseId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID of the logical database to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLogicalDatabaseRequest'
+      responses:
+        "202":
+          description: Acknowledgment with transactionId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+      # 404 etc. can be added as needed
+
+    delete:
+      summary: Delete a logical database
+      description: >
+        Deletes a logical database (and potentially all underlying physical DBs).
+        Returns a transactionId with status=Pending.
+      parameters:
+        - name: logicalDatabaseId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID of the logical database to delete
+      responses:
+        "202":
+          description: Acknowledgment with transactionId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+      # 404 etc. can be added as needed
+
+  /redis/transactions/{transactionId}:
+    get:
+      summary: Check the status of a create/update/delete transaction
+      description: >
+        Returns the current status of an asynchronous transaction.
+        If the request is completed, provides final success or failure info.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID returned by a create/update/delete request
+      responses:
+        "200":
+          description: Current transaction status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionStatus'
+        "404":
+          description: Transaction not found
+
+components:
+  schemas:
+
+    #######################################################
+    # 1. REQUEST SCHEMAS (INPUT)
+    #######################################################
+    CreateLogicalDatabaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "my-app-redis-dev"
+        environment:
+          type: string
+          example: "dev"
+        datacenters:
+          type: array
+          description: "List of DCs (with config) where the DB should be provisioned."
+          items:
+            type: object
+            properties:
+              dc:
+                type: string
+                example: "EastDC"
+              size:
+                type: string
+                example: "small"
+              replication:
+                type: boolean
+                example: false
+      required:
+        - name
+        - environment
+        - datacenters
+
+    UpdateLogicalDatabaseRequest:
+      type: object
+      properties:
+        # Adjust these fields based on your actual update logic
+        size:
+          type: string
+          example: "medium"
+        replication:
+          type: boolean
+        addDatacenters:
+          type: array
+          items:
+            type: object
+            properties:
+              dc:
+                type: string
+              size:
+                type: string
+              replication:
+                type: boolean
+
+    #######################################################
+    # 2. TRANSACTION RESPONSE (ACK)
+    #######################################################
+    TransactionResponse:
+      type: object
+      description: "Response immediately returned by create/update/delete calls, with a transactionId and pending status."
+      properties:
+        transactionId:
+          type: string
+          example: "tx-abc123"
+        status:
+          type: string
+          example: "PENDING"
+        message:
+          type: string
+          example: "Request accepted. Track status using transactionId=tx-abc123"
+
+    #######################################################
+    # 3. TRANSACTION STATUS (ASYNC)
+    #######################################################
+    TransactionStatus:
+      type: object
+      description: "Details about an asynchronous transaction."
+      properties:
+        transactionId:
+          type: string
+          example: "tx-abc123"
+        type:
+          type: string
+          description: "What operation was requested? (CREATE, UPDATE, DELETE)"
+          example: "CREATE"
+        status:
+          type: string
+          description: "Overall status of the transaction"
+          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED, PARTIAL_SUCCESS]
+          example: "COMPLETED"
+        logicalDatabaseId:
+          type: string
+          nullable: true
+          example: "ld-9999"
+          description: "The logicalDatabaseId that was affected by this transaction (if relevant)."
+        message:
+          type: string
+          description: "Human-readable status or error details."
+          example: "Provisioned EastDC successfully, WestDC failed due to capacity."
+        startTime:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:12:34Z"
+        endTime:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:14:22Z"
+        results:
+          type: array
+          description: "Optional list of sub-results if multi-DC, or partial success/fail details."
+          items:
+            type: object
+            properties:
+              dc:
+                type: string
+                example: "EastDC"
+              status:
+                type: string
+                example: "SUCCESS"
+              databaseId:
+                type: string
+                nullable: true
+                example: "db-east-111"
+              message:
+                type: string
+                example: "Provisioned successfully in EastDC."
