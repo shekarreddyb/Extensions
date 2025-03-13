@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: Redis Provisioning API
-  version: "2.0.0"
+  version: "3.0.0"
 
 servers:
   - url: https://api.example.com
@@ -13,7 +13,6 @@ tags:
     description: "Operations to check transaction (async request) statuses and history"
 
 paths:
-
   #######################################################
   # 1. DATABASE RESOURCE
   #######################################################
@@ -84,7 +83,7 @@ paths:
       summary: Create a new database (potentially across multiple DCs)
       description: >
         Creates a database record along with optional DC-specific instances.  
-        Returns a transactionId for asynchronous provisioning.
+        Returns a transaction status object (with status=PENDING) that includes requestDetails (if known).
       requestBody:
         required: true
         content:
@@ -93,11 +92,11 @@ paths:
               $ref: '#/components/schemas/CreateDatabaseRequest'
       responses:
         "202":
-          description: Acknowledgment with transactionId
+          description: Transaction status (initially PENDING)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TransactionAck'
+                $ref: '#/components/schemas/TransactionStatus'
 
   /redis/databases/{databaseId}:
     get:
@@ -127,7 +126,7 @@ paths:
       description: >
         Replaces the entire definition of the database.  
         If new DCs appear, they're created; missing DCs are removed; existing are updated.  
-        Returns a transactionId for async tracking.
+        Returns a transaction status (with status=PENDING) that includes any known requestDetails.
       parameters:
         - name: databaseId
           in: path
@@ -142,11 +141,11 @@ paths:
               $ref: '#/components/schemas/UpdateDatabaseRequest'
       responses:
         "202":
-          description: Update request accepted
+          description: Transaction status (initially PENDING)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TransactionAck'
+                $ref: '#/components/schemas/TransactionStatus'
         "404":
           description: Not Found
 
@@ -154,7 +153,8 @@ paths:
       tags: [Database]
       summary: Delete a database
       description: >
-        Deletes the logical database and its DC instances. Returns a transactionId for async tracking.
+        Deletes the logical database and its DC instances.  
+        Returns a transaction status (with status=PENDING).
       parameters:
         - name: databaseId
           in: path
@@ -163,11 +163,11 @@ paths:
             type: string
       responses:
         "202":
-          description: Deletion request accepted
+          description: Transaction status (initially PENDING)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TransactionAck'
+                $ref: '#/components/schemas/TransactionStatus'
         "404":
           description: Not Found
 
@@ -179,7 +179,7 @@ paths:
       tags: [Transaction]
       summary: Check status of an asynchronous transaction
       description: >
-        Returns details about a create/update/delete transaction, including status and sub-operations.
+        Returns details about a create/update/delete transaction, including sub-operations in requestDetails.
       parameters:
         - name: transactionId
           in: path
@@ -245,9 +245,8 @@ paths:
 
 
 components:
-
   #######################################################
-  # 1. DATABASE SCHEMAS (with new fields)
+  # 1. DATABASE SCHEMAS
   #######################################################
   schemas:
 
@@ -329,8 +328,6 @@ components:
 
     DataCenterConfig:
       type: object
-      description: >
-        Specifies how to provision or update one DC instance (size, replication, etc.).
       properties:
         dc:
           type: string
@@ -346,7 +343,6 @@ components:
 
     DatabaseSummary:
       type: object
-      description: Summary info for listing or searching
       properties:
         databaseId:
           type: string
@@ -389,7 +385,6 @@ components:
 
     DatabaseDetails:
       type: object
-      description: Full details of a single database resource, including DCs.
       properties:
         databaseId:
           type: string
@@ -436,7 +431,6 @@ components:
 
     PhysicalDBDetails:
       type: object
-      description: One DC’s instance for this database
       properties:
         datacenterId:
           type: string
@@ -465,23 +459,11 @@ components:
     #######################################################
     # 2. TRANSACTION (REQUEST) SCHEMAS
     #######################################################
-    TransactionAck:
-      type: object
-      description: Immediate response when the system accepts a create/update/delete operation.
-      properties:
-        transactionId:
-          type: string
-          example: "tx-abc123"
-        status:
-          type: string
-          example: "PENDING"
-        message:
-          type: string
-          example: "Request accepted. Track status using transactionId=tx-abc123"
-
     TransactionStatus:
       type: object
-      description: Full status of a single async transaction (request).
+      description: >
+        Full status of a single async transaction (request).  
+        Even at creation time, this can include sub-details with status=PENDING.
       properties:
         transactionId:
           type: string
@@ -497,7 +479,7 @@ components:
         status:
           type: string
           description: "PENDING, COMPLETED, FAILED, PARTIAL_SUCCESS, etc."
-          example: "PARTIAL_SUCCESS"
+          example: "PENDING"
         startTime:
           type: string
           format: date-time
@@ -505,23 +487,25 @@ components:
         endTime:
           type: string
           format: date-time
-          example: "2025-03-10T10:14:22Z"
+          example: null
         message:
           type: string
-          example: "Database updated partially. EastDC succeeded, WestDC failed."
+          example: "Request accepted; sub-operations pending."
         requestPayload:
           type: string
           nullable: true
-          description: "Optional full request body or relevant data for auditing."
+          description: "Optional raw request body or key fields for auditing."
         requestDetails:
           type: array
-          description: "Per-DC or sub-operation details."
+          description: "Per-DC or sub-operation details (might be partially unpopulated if still pending)."
           items:
             $ref: '#/components/schemas/TransactionDetail'
 
     TransactionDetail:
       type: object
-      description: Per-DC (or per sub-action) detail for partial success/failure, changed fields, etc.
+      description: >
+        Represents a sub-operation or DC-level action within a transaction.  
+        Initially many fields might be null or "PENDING"; updated later.
       properties:
         detailId:
           type: string
@@ -532,23 +516,25 @@ components:
         action:
           type: string
           description: "CREATE, UPDATE, DELETE"
-          example: "UPDATE"
+          example: "CREATE"
         status:
           type: string
-          description: "SUCCESS, FAILED, PENDING"
-          example: "SUCCESS"
+          description: "PENDING, SUCCESS, FAILED, etc."
+          example: "PENDING"
         message:
           type: string
-          example: "Size changed from small to medium."
+          example: "Awaiting processing."
         startTime:
           type: string
           format: date-time
           nullable: true
+          example: null
         endTime:
           type: string
           format: date-time
           nullable: true
+          example: null
         fieldChanges:
           type: string
-          description: "Optional JSON or text describing field-level diffs."
-          example: '[{"field":"size","old":"small","new":"medium"}]'
+          description: "Optional JSON or text describing field-level diffs if relevant."
+          example: null
