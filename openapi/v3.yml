@@ -1,10 +1,16 @@
 openapi: 3.0.0
 info:
   title: Redis Provisioning API
-  version: "1.0.0"
+  version: "2.0.0"
 
 servers:
   - url: https://api.example.com
+
+tags:
+  - name: Database
+    description: "Operations for managing logical databases"
+  - name: Transaction
+    description: "Operations to check transaction (async request) statuses and history"
 
 paths:
 
@@ -13,51 +19,47 @@ paths:
   #######################################################
   /redis/databases:
     get:
+      tags: [Database]
       summary: List or search databases
       description: >
         Retrieves a paginated list of databases.  
-        - If no query parameters are provided, returns all databases (subject to pagination).  
-        - If `name`, `environment`, or `dc` query params are provided, the server applies filters accordingly.  
+        Supports optional filters by name, environment, etc.
       parameters:
         - name: name
           in: query
-          description: "Filter by database name (exact or partial match, as implemented by the server)."
-          required: false
           schema:
             type: string
+          required: false
+          description: "Filter by partial or exact name."
         - name: environment
           in: query
-          description: "Filter by environment (e.g. dev, test, prod)."
-          required: false
           schema:
             type: string
+          required: false
         - name: dc
           in: query
-          description: >
-            One or more data center names to filter by.
-            May be repeated (e.g. `?dc=EastDC&dc=WestDC`) or comma-separated (implementation detail).
-          required: false
           schema:
             type: array
             items:
               type: string
             style: form
             explode: true
+          required: false
+          description: "One or more DC names."
         - name: page
           in: query
           schema:
             type: integer
             minimum: 1
           required: false
-          description: "Page number for pagination."
+          description: "Page number."
         - name: pageSize
           in: query
           schema:
             type: integer
             minimum: 1
           required: false
-          description: "Page size for pagination."
-
+          description: "Page size."
       responses:
         "200":
           description: A list of matching databases
@@ -78,11 +80,11 @@ paths:
                     type: integer
 
     post:
-      summary: Create a new database (potentially in multiple DCs)
+      tags: [Database]
+      summary: Create a new database (potentially across multiple DCs)
       description: >
-        Creates a new database resource.  
-        Internally, this may involve provisioning multiple physical DBs across the listed DCs.  
-        Returns a transactionId with initial status=PENDING.
+        Creates a database record along with optional DC-specific instances.  
+        Returns a transactionId for asynchronous provisioning.
       requestBody:
         required: true
         content:
@@ -99,9 +101,10 @@ paths:
 
   /redis/databases/{databaseId}:
     get:
+      tags: [Database]
       summary: Get database details
       description: >
-        Retrieves the full definition of a database, including all data centers.
+        Returns the full record for a single database, including DC details.
       parameters:
         - name: databaseId
           in: path
@@ -116,16 +119,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/DatabaseDetails'
         "404":
-          description: Database not found
+          description: Not Found
 
     put:
+      tags: [Database]
       summary: Update an existing database
       description: >
-        Replaces the entire definition of a database.  
-        - If the new definition omits a DC that previously existed, that DC is deleted.  
-        - If the new definition adds a DC, it is provisioned.  
-        - If it changes a DC's properties, that DC is updated.  
-        Returns a transactionId (PENDING).
+        Replaces the entire definition of the database.  
+        If new DCs appear, they're created; missing DCs are removed; existing are updated.  
+        Returns a transactionId for async tracking.
       parameters:
         - name: databaseId
           in: path
@@ -146,13 +148,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionAck'
         "404":
-          description: Database not found
+          description: Not Found
 
     delete:
+      tags: [Database]
       summary: Delete a database
       description: >
-        Deletes the database and any underlying data-center instances.  
-        Returns a transactionId (PENDING).
+        Deletes the logical database and its DC instances. Returns a transactionId for async tracking.
       parameters:
         - name: databaseId
           in: path
@@ -167,17 +169,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionAck'
         "404":
-          description: Database not found
+          description: Not Found
 
   #######################################################
-  # 2. TRANSACTION ENDPOINT
+  # 2. TRANSACTION ENDPOINTS
   #######################################################
   /redis/transactions/{transactionId}:
     get:
-      summary: Check the status of an asynchronous transaction
+      tags: [Transaction]
+      summary: Check status of an asynchronous transaction
       description: >
-        Returns the current status of a create, update, or delete request.
-        May show partial success/failure across data centers.
+        Returns details about a create/update/delete transaction, including status and sub-operations.
       parameters:
         - name: transactionId
           in: path
@@ -192,17 +194,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionStatus'
         "404":
-          description: Transaction not found
+          description: Not Found
+
+  /redis/databases/{databaseId}/transactions:
+    get:
+      tags: [Transaction]
+      summary: List all transactions (requests) for a specific database (audit trail)
+      description: >
+        Returns the history of create/update/delete transactions that affected this database,
+        possibly including partial successes, timestamps, etc.
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+          required: false
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+          required: false
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  databaseId:
+                    type: string
+                    example: "db-9999"
+                  transactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TransactionStatus'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalEntries:
+                    type: integer
+        "404":
+          description: Not Found
+
 
 components:
 
+  #######################################################
+  # 1. DATABASE SCHEMAS (with new fields)
+  #######################################################
   schemas:
-    #######################################################
-    # 1. DATABASE SCHEMAS
-    #######################################################
+
     CreateDatabaseRequest:
       type: object
-      description: Payload for creating a new database resource.
+      description: >
+        Fields for creating a new database resource, plus an array of DC configs.
       properties:
         name:
           type: string
@@ -210,19 +262,40 @@ components:
         environment:
           type: string
           example: "dev"
+        appId:
+          type: string
+          example: "foo-service"
+        lob:
+          type: string
+          example: "Payments"
+        module:
+          type: string
+          example: "Transactions"
+        email:
+          type: string
+          format: email
+          example: "team-foo@example.com"
+        ticket:
+          type: string
+          example: "INC12345"
+        CRDB:
+          type: boolean
+          description: "Flag indicating if CRDB is enabled"
+          example: true
         datacenters:
           type: array
-          description: "List of DC configurations."
           items:
             $ref: '#/components/schemas/DataCenterConfig'
       required:
         - name
         - environment
+        - appId
         - datacenters
 
     UpdateDatabaseRequest:
       type: object
-      description: Full replacement of the database resource definition.
+      description: >
+        Full replacement of the database definition, including new or removed DCs.
       properties:
         name:
           type: string
@@ -230,16 +303,34 @@ components:
         environment:
           type: string
           example: "dev"
+        appId:
+          type: string
+          example: "foo-service"
+        lob:
+          type: string
+        module:
+          type: string
+        email:
+          type: string
+          format: email
+        ticket:
+          type: string
+        CRDB:
+          type: boolean
         datacenters:
           type: array
           items:
             $ref: '#/components/schemas/DataCenterConfig'
       required:
+        - name
+        - environment
+        - appId
         - datacenters
-      # In a pure REST "PUT", you might also require 'name' and 'environment' every time if those remain part of the resource.
 
     DataCenterConfig:
       type: object
+      description: >
+        Specifies how to provision or update one DC instance (size, replication, etc.).
       properties:
         dc:
           type: string
@@ -266,6 +357,24 @@ components:
         environment:
           type: string
           example: "dev"
+        appId:
+          type: string
+          example: "foo-service"
+        lob:
+          type: string
+          example: "Payments"
+        module:
+          type: string
+          example: "Transactions"
+        email:
+          type: string
+          format: email
+        ticket:
+          type: string
+          example: "INC12345"
+        CRDB:
+          type: boolean
+          example: true
         status:
           type: string
           example: "ACTIVE"
@@ -273,6 +382,10 @@ components:
           type: string
           format: date-time
           example: "2025-03-10T10:00:00Z"
+        updatedTime:
+          type: string
+          format: date-time
+          nullable: true
 
     DatabaseDetails:
       type: object
@@ -287,15 +400,35 @@ components:
         environment:
           type: string
           example: "dev"
+        appId:
+          type: string
+          example: "foo-service"
+        lob:
+          type: string
+          example: "Payments"
+        module:
+          type: string
+          example: "Transactions"
+        email:
+          type: string
+          format: email
+          example: "team-foo@example.com"
+        ticket:
+          type: string
+          example: "INC12345"
+        CRDB:
+          type: boolean
+          example: true
         status:
           type: string
-          example: "PARTIAL_SUCCESS"
+          example: "ACTIVE"
         createdTime:
           type: string
           format: date-time
         updatedTime:
           type: string
           format: date-time
+          nullable: true
         datacenters:
           type: array
           items:
@@ -305,6 +438,9 @@ components:
       type: object
       description: One DC’s instance for this database
       properties:
+        datacenterId:
+          type: string
+          example: "c2274b51-14b6-46d7-a9f7-e4cfa66b2a12"
         dc:
           type: string
           example: "EastDC"
@@ -313,19 +449,25 @@ components:
           example: "small"
         replication:
           type: boolean
+          example: false
         status:
           type: string
           example: "ACTIVE"
-        lastUpdated:
+        createdTime:
           type: string
           format: date-time
+          example: "2025-03-10T10:11:00Z"
+        updatedTime:
+          type: string
+          format: date-time
+          nullable: true
 
     #######################################################
-    # 2. TRANSACTION SCHEMAS
+    # 2. TRANSACTION (REQUEST) SCHEMAS
     #######################################################
     TransactionAck:
       type: object
-      description: Immediate response for async operations
+      description: Immediate response when the system accepts a create/update/delete operation.
       properties:
         transactionId:
           type: string
@@ -335,32 +477,27 @@ components:
           example: "PENDING"
         message:
           type: string
-          example: "Request accepted. Track status with transactionId=tx-abc123"
+          example: "Request accepted. Track status using transactionId=tx-abc123"
 
     TransactionStatus:
       type: object
-      description: Status of a create/update/delete operation
+      description: Full status of a single async transaction (request).
       properties:
         transactionId:
           type: string
           example: "tx-abc123"
+        databaseId:
+          type: string
+          nullable: true
+          example: "db-9999"
         operation:
           type: string
           description: "CREATE, UPDATE, or DELETE"
-          example: "CREATE"
+          example: "UPDATE"
         status:
           type: string
-          description: "Overall transaction status"
-          enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED, PARTIAL_SUCCESS]
+          description: "PENDING, COMPLETED, FAILED, PARTIAL_SUCCESS, etc."
           example: "PARTIAL_SUCCESS"
-        databaseId:
-          type: string
-          description: "The main databaseId that was created/updated/deleted."
-          example: "db-9999"
-        message:
-          type: string
-          description: "Overall success or error message."
-          example: "EastDC updated, WestDC failed due to capacity."
         startTime:
           type: string
           format: date-time
@@ -369,18 +506,49 @@ components:
           type: string
           format: date-time
           example: "2025-03-10T10:14:22Z"
-        results:
+        message:
+          type: string
+          example: "Database updated partially. EastDC succeeded, WestDC failed."
+        requestPayload:
+          type: string
+          nullable: true
+          description: "Optional full request body or relevant data for auditing."
+        requestDetails:
           type: array
-          description: "Optional details per DC for partial success/failure."
+          description: "Per-DC or sub-operation details."
           items:
-            type: object
-            properties:
-              dc:
-                type: string
-                example: "EastDC"
-              status:
-                type: string
-                example: "SUCCESS"
-              message:
-                type: string
-                example: "Provisioned successfully."
+            $ref: '#/components/schemas/TransactionDetail'
+
+    TransactionDetail:
+      type: object
+      description: Per-DC (or per sub-action) detail for partial success/failure, changed fields, etc.
+      properties:
+        detailId:
+          type: string
+          example: "1bb83c98-4b5c-4c0c-9f17-d8375803df0f"
+        dc:
+          type: string
+          example: "EastDC"
+        action:
+          type: string
+          description: "CREATE, UPDATE, DELETE"
+          example: "UPDATE"
+        status:
+          type: string
+          description: "SUCCESS, FAILED, PENDING"
+          example: "SUCCESS"
+        message:
+          type: string
+          example: "Size changed from small to medium."
+        startTime:
+          type: string
+          format: date-time
+          nullable: true
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        fieldChanges:
+          type: string
+          description: "Optional JSON or text describing field-level diffs."
+          example: '[{"field":"size","old":"small","new":"medium"}]'
