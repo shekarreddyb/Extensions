@@ -130,3 +130,68 @@ public class JsonSeeder
 }
 
 
+
+
+
+
+
+
+using System;
+using System.Collections;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+
+public class YourDbContext : DbContext
+{
+    public YourDbContext(DbContextOptions<YourDbContext> options) : base(options) { }
+
+    // Define DbSets
+    public DbSet<Product> Products { get; set; }
+    public DbSet<Category> Categories { get; set; }
+
+    // Seed Data from JSON
+    public async Task UseAsyncSeeding()
+    {
+        var jsonDirectory = Path.Combine(AppContext.BaseDirectory, "data");
+
+        if (!Directory.Exists(jsonDirectory))
+        {
+            Console.WriteLine($"JSON directory not found: {jsonDirectory}");
+            return;
+        }
+
+        Console.WriteLine($"Seeding from JSON directory: {jsonDirectory}");
+
+        var dbSetProperties = this.GetType()
+            .GetProperties()
+            .Where(p => p.PropertyType.IsGenericType &&
+                        p.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>))
+            .ToList();
+
+        foreach (var dbSetProperty in dbSetProperties)
+        {
+            var entityType = dbSetProperty.PropertyType.GetGenericArguments().First();
+            var jsonFilePath = Path.Combine(jsonDirectory, $"{entityType.Name}.json");
+
+            if (!File.Exists(jsonFilePath))
+                continue; // Skip if file does not exist
+
+            var jsonData = await File.ReadAllTextAsync(jsonFilePath);
+            var entities = JsonSerializer.Deserialize(jsonData, typeof(List<>).MakeGenericType(entityType)) as IEnumerable;
+
+            if (entities == null || !entities.Cast<object>().Any()) continue;
+
+            var dbSet = dbSetProperty.GetValue(this);
+            var addMethod = dbSet?.GetType().GetMethod("AddRangeAsync");
+
+            if (addMethod != null)
+                await (Task)addMethod.Invoke(dbSet, new object[] { entities, default });
+
+            await this.SaveChangesAsync();
+        }
+    }
+}
