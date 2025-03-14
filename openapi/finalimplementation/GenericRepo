@@ -1,0 +1,92 @@
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Threading.Tasks;
+using YourAppNamespace.Data.Specifications;
+
+namespace YourAppNamespace.Data
+{
+    public class GenericRepository<T> : IGenericRepository<T> where T : class, ISoftDelete
+    {
+        protected readonly DbContext _context;
+        protected readonly DbSet<T> _dbSet;
+
+        public GenericRepository(DbContext context)
+        {
+            _context = context;
+            _dbSet = _context.Set<T>();
+        }
+
+        public async Task<T> GetByIdAsync(Guid id)
+        {
+            return await _dbSet.FirstOrDefaultAsync(e => EF.Property<Guid>(e, "Id") == id && !e.IsDeleted);
+        }
+
+        public async Task<IEnumerable<T>> GetAllAsync()
+        {
+            return await _dbSet.Where(e => !e.IsDeleted).ToListAsync();
+        }
+
+        public async Task<IEnumerable<T>> SearchAsync(ISpecification<T> spec)
+        {
+            var query = ApplySpecification(spec);
+            return await query.ToListAsync();
+        }
+
+        public async Task AddAsync(T entity)
+        {
+            await _dbSet.AddAsync(entity);
+        }
+
+        public async Task AddRangeAsync(IEnumerable<T> entities)
+        {
+            await _dbSet.AddRangeAsync(entities);
+        }
+
+        public void Update(T entity)
+        {
+            _dbSet.Update(entity);
+        }
+
+        public void UpdateRange(IEnumerable<T> entities)
+        {
+            _dbSet.UpdateRange(entities);
+        }
+
+        public void Delete(T entity)
+        {
+            entity.IsDeleted = true;
+            _dbSet.Update(entity);
+        }
+
+        public void DeleteRange(IEnumerable<T> entities)
+        {
+            foreach (var entity in entities)
+            {
+                entity.IsDeleted = true;
+            }
+            _dbSet.UpdateRange(entities);
+        }
+
+        private IQueryable<T> ApplySpecification(ISpecification<T> spec)
+        {
+            IQueryable<T> query = _dbSet.Where(e => !e.IsDeleted);
+
+            if (spec.Criteria != null)
+                query = query.Where(spec.Criteria);
+
+            if (spec.OrderBy != null)
+                query = query.OrderBy(spec.OrderBy);
+
+            if (spec.OrderByDescending != null)
+                query = query.OrderByDescending(spec.OrderByDescending);
+
+            if (spec.IsPagingEnabled)
+                query = query.Skip((spec.Page.Value - 1) * spec.PageSize.Value).Take(spec.PageSize.Value);
+
+            return query;
+        }
+    }
+}
