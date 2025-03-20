@@ -117,10 +117,11 @@
       }
     }
 
-    // Load release definitions for the given collection and project.
+    // Load release definitions with expanded environments for the given collection and project.
     async function loadReleaseDefinitions(collectionId, projectId) {
       try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions?api-version=5.1`);
+        // Use $expand=environments to retrieve environments along with definitions.
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions?api-version=5.1&$expand=environments`);
         if (response.ok) {
           const data = await response.json();
           const definitions = data.value;
@@ -130,6 +131,8 @@
             const option = document.createElement('option');
             option.value = definition.id;
             option.textContent = definition.name;
+            // Store environments as a JSON string in a data attribute.
+            option.dataset.environments = JSON.stringify(definition.environments || []);
             dropdown.appendChild(option);
           });
         } else {
@@ -140,27 +143,26 @@
       }
     }
 
-    // Load environments for the selected release definition.
-    async function loadEnvironments(collectionId, projectId, releaseDefinitionId) {
-      try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments?api-version=5.1`);
-        if (response.ok) {
-          const data = await response.json();
-          const environments = data.value;
-          const dropdown = document.getElementById('environment');
-          dropdown.innerHTML = '<option selected>Choose...</option>';
-          environments.forEach(env => {
-            const option = document.createElement('option');
-            option.value = env.id;
-            option.textContent = env.name;
-            dropdown.appendChild(option);
-          });
-        } else {
-          console.error('Failed to load environments');
+    // Populate environments dropdown from the selected release definition.
+    function populateEnvironments() {
+      const releaseDefDropdown = document.getElementById('releaseDefinition');
+      const selectedOption = releaseDefDropdown.options[releaseDefDropdown.selectedIndex];
+      let environments = [];
+      if (selectedOption && selectedOption.dataset.environments) {
+        try {
+          environments = JSON.parse(selectedOption.dataset.environments);
+        } catch (e) {
+          console.error('Error parsing environments data', e);
         }
-      } catch (error) {
-        console.error('Error loading environments:', error);
       }
+      const dropdown = document.getElementById('environment');
+      dropdown.innerHTML = '<option selected>Choose...</option>';
+      environments.forEach(env => {
+        const option = document.createElement('option');
+        option.value = env.id;
+        option.textContent = env.name;
+        dropdown.appendChild(option);
+      });
     }
 
     // Load release variables for the selected environment.
@@ -317,7 +319,7 @@
       
       document.getElementById('releaseDefinition').addEventListener('change', function() {
         selectedReleaseDefinition = this.value;
-        loadEnvironments(selectedCollection, selectedProject, selectedReleaseDefinition);
+        populateEnvironments();
       });
       
       document.getElementById('environment').addEventListener('change', function() {
