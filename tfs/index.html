@@ -73,7 +73,7 @@
     // Load project collections.
     async function loadProjectCollections() {
       try {
-        const response = await fetch(`${DOMAIN}/_apis/projectCollections?api-version=6.0`);
+        const response = await fetch(`${DOMAIN}/_apis/projectCollections?api-version=5.1`);
         if (response.ok) {
           const data = await response.json();
           const collections = data.value;
@@ -97,7 +97,7 @@
     // Load projects for the selected collection.
     async function loadProjects(collectionId) {
       try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/_apis/projects?api-version=6.0`);
+        const response = await fetch(`${DOMAIN}/${collectionId}/_apis/projects?api-version=5.1`);
         if (response.ok) {
           const data = await response.json();
           const projects = data.value;
@@ -120,7 +120,7 @@
     // Load release definitions for the given collection and project.
     async function loadReleaseDefinitions(collectionId, projectId) {
       try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions?api-version=6.0`);
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions?api-version=5.1`);
         if (response.ok) {
           const data = await response.json();
           const definitions = data.value;
@@ -143,7 +143,7 @@
     // Load environments for the selected release definition.
     async function loadEnvironments(collectionId, projectId, releaseDefinitionId) {
       try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments?api-version=6.0`);
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments?api-version=5.1`);
         if (response.ok) {
           const data = await response.json();
           const environments = data.value;
@@ -166,7 +166,7 @@
     // Load release variables for the selected environment.
     async function loadReleaseVariables(collectionId, projectId, releaseDefinitionId, environmentId) {
       try {
-        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments/${environmentId}/variables?api-version=6.0`);
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments/${environmentId}/variables?api-version=5.1`);
         if (response.ok) {
           const data = await response.json();
           const variables = data.value;
@@ -235,7 +235,7 @@
     async function deleteVariable(variableId, rowElement) {
       const environmentId = document.getElementById('environment').value;
       try {
-        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables/${variableId}?api-version=6.0`, {
+        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables/${variableId}?api-version=5.1`, {
           method: 'DELETE'
         });
         if (response.ok) {
@@ -264,7 +264,7 @@
       });
       
       try {
-        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables?api-version=6.0`, {
+        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables?api-version=5.1`, {
           method: 'PUT', // Change to POST if required by your API.
           headers: {
             'Content-Type': 'application/json'
