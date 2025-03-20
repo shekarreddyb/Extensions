@@ -3,50 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <title>Azure DevOps TFS Release Variables</title>
-  <!-- Bootstrap CSS (using Bootstrap 5 CDN) -->
+  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
   <div class="container my-4">
     <h2 class="mb-4">Azure DevOps TFS Release Variables Management</h2>
-    <!-- Form with cascading dropdowns -->
     <form>
       <div class="row g-3 mb-4">
         <div class="col-md-3">
           <label for="projectCollection" class="form-label">Project Collection</label>
           <select id="projectCollection" class="form-select">
             <option selected>Choose...</option>
-            <option value="collection1">Collection 1</option>
-            <option value="collection2">Collection 2</option>
           </select>
         </div>
         <div class="col-md-3">
           <label for="project" class="form-label">Project</label>
           <select id="project" class="form-select">
             <option selected>Choose...</option>
-            <option value="project1">Project 1</option>
-            <option value="project2">Project 2</option>
           </select>
         </div>
         <div class="col-md-3">
           <label for="releaseDefinition" class="form-label">Release Definition</label>
           <select id="releaseDefinition" class="form-select">
             <option selected>Choose...</option>
-            <option value="definition1">Definition 1</option>
-            <option value="definition2">Definition 2</option>
           </select>
         </div>
         <div class="col-md-3">
           <label for="environment" class="form-label">Environment</label>
           <select id="environment" class="form-select">
             <option selected>Choose...</option>
-            <option value="env1">Environment 1</option>
-            <option value="env2">Environment 2</option>
           </select>
         </div>
       </div>
 
-      <!-- Release Variables Table -->
       <div class="mb-3">
         <h4>Release Variables</h4>
         <table class="table table-bordered table-striped">
@@ -59,316 +49,292 @@
             </tr>
           </thead>
           <tbody id="variableTableBody">
-            <tr>
-              <td>
-                <input type="text" class="form-control" value="Var1">
-              </td>
-              <td>
-                <input type="text" class="form-control" value="Value1">
-              </td>
-              <td>
-                <select class="form-select">
-                  <option value="false" selected>No</option>
-                  <option value="true">Yes</option>
-                </select>
-              </td>
-              <td>
-                <!-- Action buttons; their functionality can be wired up with JavaScript -->
-                <button type="button" class="btn btn-sm btn-outline-secondary me-1">Edit</button>
-                <button type="button" class="btn btn-sm btn-outline-danger">Delete</button>
-              </td>
-            </tr>
-            <!-- Additional rows can be added dynamically -->
+            <!-- Rows will be added dynamically -->
           </tbody>
         </table>
         <button type="button" class="btn btn-success" id="addVariable">Add Variable</button>
       </div>
-
-      <!-- Save Changes Button -->
+      
       <div class="d-grid">
         <button type="submit" class="btn btn-primary">Save Changes</button>
       </div>
     </form>
   </div>
 
-  <!-- Bootstrap JS (optional for interactive components) -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Replace with your actual TFS domain.
+    const DOMAIN = 'https://yourdomain.com';
 
-<script>
-// Base URL for your API endpoints
-const API_BASE = '/api';
+    // Global variables to store current selections.
+    let selectedCollection = '';
+    let selectedProject = '';
+    let selectedReleaseDefinition = '';
 
-// Load Project Collections
-async function loadProjectCollections() {
-  try {
-    const response = await fetch(`${API_BASE}/projectCollections`);
-    if (response.ok) {
-      const collections = await response.json();
-      const dropdown = document.getElementById('projectCollection');
-      dropdown.innerHTML = '<option selected>Choose...</option>';
-      collections.forEach(collection => {
-        const option = document.createElement('option');
-        option.value = collection.id;
-        option.textContent = collection.name;
-        dropdown.appendChild(option);
-      });
-    } else {
-      console.error('Failed to load project collections');
+    // Load project collections.
+    async function loadProjectCollections() {
+      try {
+        const response = await fetch(`${DOMAIN}/_apis/projectCollections?api-version=6.0`);
+        if (response.ok) {
+          const data = await response.json();
+          const collections = data.value;
+          const dropdown = document.getElementById('projectCollection');
+          dropdown.innerHTML = '<option selected>Choose...</option>';
+          collections.forEach(collection => {
+            const option = document.createElement('option');
+            // Assuming the collection name is used in subsequent URLs.
+            option.value = collection.name; 
+            option.textContent = collection.name;
+            dropdown.appendChild(option);
+          });
+        } else {
+          console.error('Failed to load project collections');
+        }
+      } catch (error) {
+        console.error('Error loading project collections:', error);
+      }
     }
-  } catch (error) {
-    console.error('Error loading project collections:', error);
-  }
-}
 
-// Load Projects based on selected collection
-async function loadProjects(collectionId) {
-  try {
-    const response = await fetch(`${API_BASE}/projects?collectionId=${collectionId}`);
-    if (response.ok) {
-      const projects = await response.json();
-      const dropdown = document.getElementById('project');
-      dropdown.innerHTML = '<option selected>Choose...</option>';
-      projects.forEach(project => {
-        const option = document.createElement('option');
-        option.value = project.id;
-        option.textContent = project.name;
-        dropdown.appendChild(option);
-      });
-    } else {
-      console.error('Failed to load projects');
+    // Load projects for the selected collection.
+    async function loadProjects(collectionId) {
+      try {
+        const response = await fetch(`${DOMAIN}/${collectionId}/_apis/projects?api-version=6.0`);
+        if (response.ok) {
+          const data = await response.json();
+          const projects = data.value;
+          const dropdown = document.getElementById('project');
+          dropdown.innerHTML = '<option selected>Choose...</option>';
+          projects.forEach(project => {
+            const option = document.createElement('option');
+            option.value = project.id;
+            option.textContent = project.name;
+            dropdown.appendChild(option);
+          });
+        } else {
+          console.error('Failed to load projects');
+        }
+      } catch (error) {
+        console.error('Error loading projects:', error);
+      }
     }
-  } catch (error) {
-    console.error('Error loading projects:', error);
-  }
-}
 
-// Load Release Definitions based on selected project
-async function loadReleaseDefinitions(projectId) {
-  try {
-    const response = await fetch(`${API_BASE}/releaseDefinitions?projectId=${projectId}`);
-    if (response.ok) {
-      const definitions = await response.json();
-      const dropdown = document.getElementById('releaseDefinition');
-      dropdown.innerHTML = '<option selected>Choose...</option>';
-      definitions.forEach(definition => {
-        const option = document.createElement('option');
-        option.value = definition.id;
-        option.textContent = definition.name;
-        dropdown.appendChild(option);
-      });
-    } else {
-      console.error('Failed to load release definitions');
+    // Load release definitions for the given collection and project.
+    async function loadReleaseDefinitions(collectionId, projectId) {
+      try {
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions?api-version=6.0`);
+        if (response.ok) {
+          const data = await response.json();
+          const definitions = data.value;
+          const dropdown = document.getElementById('releaseDefinition');
+          dropdown.innerHTML = '<option selected>Choose...</option>';
+          definitions.forEach(definition => {
+            const option = document.createElement('option');
+            option.value = definition.id;
+            option.textContent = definition.name;
+            dropdown.appendChild(option);
+          });
+        } else {
+          console.error('Failed to load release definitions');
+        }
+      } catch (error) {
+        console.error('Error loading release definitions:', error);
+      }
     }
-  } catch (error) {
-    console.error('Error loading release definitions:', error);
-  }
-}
 
-// Load Environments based on selected release definition
-async function loadEnvironments(releaseDefinitionId) {
-  try {
-    const response = await fetch(`${API_BASE}/environments?releaseDefinitionId=${releaseDefinitionId}`);
-    if (response.ok) {
-      const environments = await response.json();
-      const dropdown = document.getElementById('environment');
-      dropdown.innerHTML = '<option selected>Choose...</option>';
-      environments.forEach(env => {
-        const option = document.createElement('option');
-        option.value = env.id;
-        option.textContent = env.name;
-        dropdown.appendChild(option);
-      });
-    } else {
-      console.error('Failed to load environments');
+    // Load environments for the selected release definition.
+    async function loadEnvironments(collectionId, projectId, releaseDefinitionId) {
+      try {
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments?api-version=6.0`);
+        if (response.ok) {
+          const data = await response.json();
+          const environments = data.value;
+          const dropdown = document.getElementById('environment');
+          dropdown.innerHTML = '<option selected>Choose...</option>';
+          environments.forEach(env => {
+            const option = document.createElement('option');
+            option.value = env.id;
+            option.textContent = env.name;
+            dropdown.appendChild(option);
+          });
+        } else {
+          console.error('Failed to load environments');
+        }
+      } catch (error) {
+        console.error('Error loading environments:', error);
+      }
     }
-  } catch (error) {
-    console.error('Error loading environments:', error);
-  }
-}
 
-// Load Release Variables for the selected environment
-async function loadReleaseVariables(environmentId) {
-  try {
-    const response = await fetch(`${API_BASE}/releaseVariables?environmentId=${environmentId}`);
-    if (response.ok) {
-      const variables = await response.json();
+    // Load release variables for the selected environment.
+    async function loadReleaseVariables(collectionId, projectId, releaseDefinitionId, environmentId) {
+      try {
+        const response = await fetch(`${DOMAIN}/${collectionId}/${projectId}/_apis/release/definitions/${releaseDefinitionId}/environments/${environmentId}/variables?api-version=6.0`);
+        if (response.ok) {
+          const data = await response.json();
+          const variables = data.value;
+          const tbody = document.getElementById('variableTableBody');
+          tbody.innerHTML = ''; // Clear existing rows.
+          variables.forEach(variable => {
+            const row = document.createElement('tr');
+            row.dataset.variableId = variable.id;
+            
+            const nameCell = document.createElement('td');
+            nameCell.innerHTML = `<input type="text" class="form-control" value="${variable.name}">`;
+            
+            const valueCell = document.createElement('td');
+            valueCell.innerHTML = `<input type="text" class="form-control" value="${variable.value}">`;
+            
+            const securedCell = document.createElement('td');
+            securedCell.innerHTML = `
+              <select class="form-select">
+                <option value="false" ${!variable.isSecret ? 'selected' : ''}>No</option>
+                <option value="true" ${variable.isSecret ? 'selected' : ''}>Yes</option>
+              </select>
+            `;
+            
+            const actionCell = document.createElement('td');
+            actionCell.innerHTML = `
+              <button type="button" class="btn btn-sm btn-outline-secondary edit-variable">Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-danger delete-variable">Delete</button>
+            `;
+            
+            row.appendChild(nameCell);
+            row.appendChild(valueCell);
+            row.appendChild(securedCell);
+            row.appendChild(actionCell);
+            tbody.appendChild(row);
+          });
+        } else {
+          console.error('Failed to load release variables');
+        }
+      } catch (error) {
+        console.error('Error loading release variables:', error);
+      }
+    }
+
+    // Add a new row to the Release Variables table.
+    function addVariableRow() {
       const tbody = document.getElementById('variableTableBody');
-      tbody.innerHTML = ''; // Clear existing rows
-
-      variables.forEach(variable => {
-        const row = document.createElement('tr');
-        // Store the variable id in a data attribute (if available)
-        row.dataset.variableId = variable.id;
-        
-        // Variable Name
-        const nameCell = document.createElement('td');
-        nameCell.innerHTML = `<input type="text" class="form-control" value="${variable.name}">`;
-        
-        // Variable Value
-        const valueCell = document.createElement('td');
-        valueCell.innerHTML = `<input type="text" class="form-control" value="${variable.value}">`;
-        
-        // Secured Flag
-        const securedCell = document.createElement('td');
-        securedCell.innerHTML = `
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><input type="text" class="form-control" placeholder="Variable Name"></td>
+        <td><input type="text" class="form-control" placeholder="Value"></td>
+        <td>
           <select class="form-select">
-            <option value="false" ${!variable.secured ? 'selected' : ''}>No</option>
-            <option value="true" ${variable.secured ? 'selected' : ''}>Yes</option>
+            <option value="false" selected>No</option>
+            <option value="true">Yes</option>
           </select>
-        `;
-        
-        // Actions: Edit and Delete
-        const actionCell = document.createElement('td');
-        actionCell.innerHTML = `
+        </td>
+        <td>
           <button type="button" class="btn btn-sm btn-outline-secondary edit-variable">Edit</button>
           <button type="button" class="btn btn-sm btn-outline-danger delete-variable">Delete</button>
-        `;
-        
-        row.appendChild(nameCell);
-        row.appendChild(valueCell);
-        row.appendChild(securedCell);
-        row.appendChild(actionCell);
-        tbody.appendChild(row);
+        </td>
+      `;
+      tbody.appendChild(row);
+    }
+
+    // Delete a release variable using its id.
+    async function deleteVariable(variableId, rowElement) {
+      const environmentId = document.getElementById('environment').value;
+      try {
+        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables/${variableId}?api-version=6.0`, {
+          method: 'DELETE'
+        });
+        if (response.ok) {
+          rowElement.remove();
+        } else {
+          console.error('Failed to delete variable');
+        }
+      } catch (error) {
+        console.error('Error deleting variable:', error);
+      }
+    }
+
+    // Save all changes (update or add variables).
+    async function saveChanges() {
+      const environmentId = document.getElementById('environment').value;
+      const tbody = document.getElementById('variableTableBody');
+      const rows = tbody.querySelectorAll('tr');
+      const variables = [];
+      
+      rows.forEach(row => {
+        const variableId = row.dataset.variableId || null;
+        const name = row.cells[0].querySelector('input').value;
+        const value = row.cells[1].querySelector('input').value;
+        const secured = row.cells[2].querySelector('select').value === 'true';
+        variables.push({ id: variableId, name, value, isSecret: secured });
       });
-    } else {
-      console.error('Failed to load release variables');
+      
+      try {
+        const response = await fetch(`${DOMAIN}/${selectedCollection}/${selectedProject}/_apis/release/definitions/${selectedReleaseDefinition}/environments/${environmentId}/variables?api-version=6.0`, {
+          method: 'PUT', // Change to POST if required by your API.
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(variables)
+        });
+        if (response.ok) {
+          alert('Release variables updated successfully!');
+          loadReleaseVariables(selectedCollection, selectedProject, selectedReleaseDefinition, environmentId);
+        } else {
+          console.error('Failed to save changes');
+          alert('Error saving changes');
+        }
+      } catch (error) {
+        console.error('Error saving changes:', error);
+        alert('Error saving changes');
+      }
     }
-  } catch (error) {
-    console.error('Error loading release variables:', error);
-  }
-}
 
-// Add a new row to the Release Variables table
-function addVariableRow() {
-  const tbody = document.getElementById('variableTableBody');
-  const row = document.createElement('tr');
-  // New variables will not have an id until saved
-  row.innerHTML = `
-    <td><input type="text" class="form-control" placeholder="Variable Name"></td>
-    <td><input type="text" class="form-control" placeholder="Value"></td>
-    <td>
-      <select class="form-select">
-        <option value="false" selected>No</option>
-        <option value="true">Yes</option>
-      </select>
-    </td>
-    <td>
-      <button type="button" class="btn btn-sm btn-outline-secondary edit-variable">Edit</button>
-      <button type="button" class="btn btn-sm btn-outline-danger delete-variable">Delete</button>
-    </td>
-  `;
-  tbody.appendChild(row);
-}
-
-// Delete a release variable using its id
-async function deleteVariable(variableId, rowElement) {
-  try {
-    const response = await fetch(`${API_BASE}/releaseVariables/${variableId}`, {
-      method: 'DELETE'
+    // Attach event listeners for row actions using event delegation.
+    document.getElementById('variableTableBody').addEventListener('click', async function(e) {
+      if (e.target && e.target.classList.contains('delete-variable')) {
+        const row = e.target.closest('tr');
+        const variableId = row.dataset.variableId;
+        if (variableId) {
+          await deleteVariable(variableId, row);
+        } else {
+          row.remove();
+        }
+      }
+      if (e.target && e.target.classList.contains('edit-variable')) {
+        // For inline editing, the inputs are already editable.
+        console.log('Edit clicked for row:', e.target.closest('tr'));
+      }
     });
-    if (response.ok) {
-      rowElement.remove();
-    } else {
-      console.error('Failed to delete variable');
-    }
-  } catch (error) {
-    console.error('Error deleting variable:', error);
-  }
-}
 
-// Save all changes (update or add release variables) for the selected environment
-async function saveChanges() {
-  const environmentId = document.getElementById('environment').value;
-  const tbody = document.getElementById('variableTableBody');
-  const rows = tbody.querySelectorAll('tr');
-  const variables = [];
-
-  rows.forEach(row => {
-    const variableId = row.dataset.variableId || null;
-    const name = row.cells[0].querySelector('input').value;
-    const value = row.cells[1].querySelector('input').value;
-    const secured = row.cells[2].querySelector('select').value === 'true';
-    variables.push({ id: variableId, name, value, secured });
-  });
-
-  try {
-    const response = await fetch(`${API_BASE}/releaseVariables?environmentId=${environmentId}`, {
-      method: 'PUT', // Change to POST if that better suits your API design
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(variables)
+    // Set up cascading dropdown events after DOM content is loaded.
+    document.addEventListener('DOMContentLoaded', function() {
+      loadProjectCollections();
+      
+      document.getElementById('projectCollection').addEventListener('change', function() {
+        selectedCollection = this.value;
+        loadProjects(selectedCollection);
+      });
+      
+      document.getElementById('project').addEventListener('change', function() {
+        selectedProject = this.value;
+        loadReleaseDefinitions(selectedCollection, selectedProject);
+      });
+      
+      document.getElementById('releaseDefinition').addEventListener('change', function() {
+        selectedReleaseDefinition = this.value;
+        loadEnvironments(selectedCollection, selectedProject, selectedReleaseDefinition);
+      });
+      
+      document.getElementById('environment').addEventListener('change', function() {
+        const environmentId = this.value;
+        loadReleaseVariables(selectedCollection, selectedProject, selectedReleaseDefinition, environmentId);
+      });
+      
+      document.getElementById('addVariable').addEventListener('click', addVariableRow);
+      
+      // Save changes on form submission.
+      document.querySelector('form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveChanges();
+      });
     });
-    if (response.ok) {
-      alert('Release variables updated successfully!');
-      // Optionally reload variables to reflect saved changes
-      loadReleaseVariables(environmentId);
-    } else {
-      console.error('Failed to save changes');
-      alert('Error saving changes');
-    }
-  } catch (error) {
-    console.error('Error saving changes:', error);
-    alert('Error saving changes');
-  }
-}
-
-// Event listeners for delete and edit buttons using event delegation
-document.getElementById('variableTableBody').addEventListener('click', async function(e) {
-  if (e.target && e.target.classList.contains('delete-variable')) {
-    const row = e.target.closest('tr');
-    const variableId = row.dataset.variableId;
-    if (variableId) {
-      await deleteVariable(variableId, row);
-    } else {
-      // If the variable does not have an id (new row), just remove it from the table.
-      row.remove();
-    }
-  }
-
-  // Optional: handle the edit action if additional processing is needed.
-  if (e.target && e.target.classList.contains('edit-variable')) {
-    // For inline editing, no additional action may be needed.
-    // This block is a placeholder if you wish to implement modal dialogs or other edit functionality.
-    console.log('Edit clicked for row:', e.target.closest('tr'));
-  }
-});
-
-// Attach event listeners once the DOM content is loaded
-document.addEventListener('DOMContentLoaded', function() {
-  loadProjectCollections();
-
-  // Cascade dropdowns
-  document.getElementById('projectCollection').addEventListener('change', function() {
-    const collectionId = this.value;
-    loadProjects(collectionId);
-  });
-  
-  document.getElementById('project').addEventListener('change', function() {
-    const projectId = this.value;
-    loadReleaseDefinitions(projectId);
-  });
-  
-  document.getElementById('releaseDefinition').addEventListener('change', function() {
-    const releaseDefinitionId = this.value;
-    loadEnvironments(releaseDefinitionId);
-  });
-  
-  document.getElementById('environment').addEventListener('change', function() {
-    const environmentId = this.value;
-    loadReleaseVariables(environmentId);
-  });
-  
-  // Add Variable button
-  document.getElementById('addVariable').addEventListener('click', addVariableRow);
-  
-  // Save Changes button (form submission)
-  document.querySelector('form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    saveChanges();
-  });
-});
-</script>
-  
+  </script>
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
