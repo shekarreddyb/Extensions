@@ -1,16 +1,7 @@
-public class OperationTaskState : SagaStateMachineInstance
-{
-    public Guid CorrelationId { get; set; }
-    public string CurrentState { get; set; }
-    public string TransactionId { get; set; }
-    public string DatabaseId { get; set; }
-    public string ClusterId { get; set; }
-    public string Operation { get; set; }
-    public int PollingAttempt { get; set; }
-}
-
 public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
 {
+    private readonly ITaskExecutionFactory _factory;
+
     public State Polling { get; private set; }
     public State Completed { get; private set; }
     public State Failed { get; private set; }
@@ -23,6 +14,7 @@ public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
 
     public OperationTaskSaga(ITaskExecutionFactory factory)
     {
+        _factory = factory;
         InstanceState(x => x.CurrentState);
 
         Event(() => StartTask, x => x.CorrelateById(context => context.Message.OperationTaskId));
@@ -30,29 +22,29 @@ public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
 
         Schedule(() => PollingSchedule, x => x.CorrelationId, x =>
         {
-            x.Delay = TimeSpan.FromSeconds(10);
+            x.Delay = TimeSpan.FromSeconds(10); // Initial delay
             x.Received = e => e.CorrelateById(context => context.Message.OperationTaskId);
         });
 
         Initially(
             When(StartTask)
-                .ThenAsync(context => HandleStartTask(context, factory))
+                .ThenAsync(context => HandleStartTask(context))
                 .Schedule(PollingSchedule, context => context.Init<PollProvisioningTask>(new
                 {
                     OperationTaskId = context.Saga.CorrelationId
-                }))
+                }), context => TimeSpan.FromSeconds(10)) // Initial schedule
                 .TransitionTo(Polling)
         );
 
         During(Polling,
             When(Poll)
-                .ThenAsync(context => HandlePoll(context, factory))
+                .ThenAsync(context => HandlePoll(context))
         );
 
         SetCompletedWhenFinalized();
     }
 
-    private async Task HandleStartTask(BehaviorContext<OperationTaskState, StartProvisioningTask> context, ITaskExecutionFactory factory)
+    private async Task HandleStartTask(BehaviorContext<OperationTaskState, StartProvisioningTask> context)
     {
         var state = context.Saga;
         var message = context.Message;
@@ -63,22 +55,28 @@ public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
         state.Operation = message.Operation;
         state.PollingAttempt = 0;
 
-        var db = context.GetPayload<IServiceProvider>().GetRequiredService<IProvisioningDbContext>();
+        using var scope = context.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IProvisioningDbContext>();
         var task = await db.OperationTasks.FindAsync(message.OperationTaskId);
-        var strategy = factory.GetStrategy(message.Operation);
+        var strategy = _factory.GetStrategy(message.Operation);
         await strategy.ExecuteStartAsync(task);
     }
 
-    private async Task HandlePoll(BehaviorContext<OperationTaskState, PollProvisioningTask> context, ITaskExecutionFactory factory)
+    private async Task HandlePoll(BehaviorContext<OperationTaskState, PollProvisioningTask> context)
     {
         var state = context.Saga;
         state.PollingAttempt++;
 
-        var db = context.GetPayload<IServiceProvider>().GetRequiredService<IProvisioningDbContext>();
+        using var scope = context.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IProvisioningDbContext>();
         var task = await db.OperationTasks.FindAsync(state.CorrelationId);
-        if (task == null) return;
+        if (task == null)
+        {
+            await context.Unschedule(PollingSchedule);
+            return;
+        }
 
-        var strategy = factory.GetStrategy(state.Operation);
+        var strategy = _factory.GetStrategy(state.Operation);
         var result = await strategy.PollStatusAsync(task);
 
         switch (result.Status)
@@ -93,24 +91,21 @@ public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
                     ClusterId = state.ClusterId
                 });
                 state.CurrentState = "Completed";
+                await context.Unschedule(PollingSchedule);
                 break;
 
-            case "Failed" when state.PollingAttempt >= MaxPollingAttempts:
-                await PublishFailure(context, "Failed or timed out");
+            case "Failed":
+                await PublishFailure(context, "Task failed");
+                await context.Unschedule(PollingSchedule);
                 break;
 
             default:
-                if (state.PollingAttempt < MaxPollingAttempts)
-                {
-                    await context.Schedule(PollingSchedule, context.Init<PollProvisioningTask>(new
-                    {
-                        OperationTaskId = state.CorrelationId
-                    }));
-                }
-                else
+                if (state.PollingAttempt >= MaxPollingAttempts)
                 {
                     await PublishFailure(context, "Maximum polling attempts reached");
+                    await context.Unschedule(PollingSchedule);
                 }
+                // No manual rescheduling - rely on Quartz recurring schedule
                 break;
         }
     }
@@ -130,7 +125,18 @@ public class OperationTaskSaga : MassTransitStateMachine<OperationTaskState>
     }
 }
 
-// Event classes remain the same
+// State and Event classes remain unchanged
+public class OperationTaskState : SagaStateMachineInstance
+{
+    public Guid CorrelationId { get; set; }
+    public string CurrentState { get; set; }
+    public string TransactionId { get; set; }
+    public string DatabaseId { get; set; }
+    public string ClusterId { get; set; }
+    public string Operation { get; set; }
+    public int PollingAttempt { get; set; }
+}
+
 public record StartProvisioningTask
 {
     public Guid OperationTaskId { get; init; }
