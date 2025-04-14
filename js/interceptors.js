@@ -44,3 +44,21 @@ export class ApiDomainInterceptor implements HttpInterceptor {
     return next.handle(updatedReq);
   }
 }
+
+
+
+
+// app.module.ts
+import { HTTP_INTERCEPTORS } from '@angular/common/http';
+import { ApiDomainInterceptor } from './api-domain.interceptor';
+
+@NgModule({
+  providers: [
+    {
+      provide: HTTP_INTERCEPTORS,
+      useClass: ApiDomainInterceptor,
+      multi: true
+    }
+  ]
+})
+export class AppModule {}
