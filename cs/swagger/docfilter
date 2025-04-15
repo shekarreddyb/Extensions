@@ -1,0 +1,102 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.SwaggerGen;
+using System.Text.Json;
+
+public class JsonDescriptionOperationFilter : IOperationFilter
+{
+    private readonly string _specFolder;
+    private readonly ILogger<JsonDescriptionOperationFilter>? _logger;
+
+    public JsonDescriptionOperationFilter(string specFolder = "OpenApiSpecs", ILogger<JsonDescriptionOperationFilter>? logger = null)
+    {
+        _specFolder = specFolder;
+        _logger = logger;
+    }
+
+    public void Apply(OpenApiOperation operation, OperationFilterContext context)
+    {
+        var opId = context.ApiDescription.ActionDescriptor?.AttributeRouteInfo?.Name
+                ?? context.ApiDescription.OperationId
+                ?? context.ApiDescription.RelativePath?.Replace("/", "_").Replace("{", "").Replace("}", "") ?? "default";
+
+        var fileName = Path.Combine(_specFolder, $"{opId}.json");
+
+        if (!File.Exists(fileName))
+        {
+            _logger?.LogWarning("Spec file not found for operation {OpId}: {Path}", opId, fileName);
+            return;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(fileName);
+            var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("summary", out var summaryProp))
+                operation.Summary = ResolveValue(summaryProp.GetString());
+
+            if (root.TryGetProperty("description", out var descProp))
+                operation.Description = ResolveMarkdown(descProp.GetString());
+
+            if (root.TryGetProperty("responses", out var responsesProp))
+                ApplyExamplesToResponses(operation, responsesProp);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error reading spec file {Path}", fileName);
+        }
+    }
+
+    private void ApplyExamplesToResponses(OpenApiOperation operation, JsonElement responsesProp)
+    {
+        foreach (var responseEntry in responsesProp.EnumerateObject())
+        {
+            var statusCode = responseEntry.Name;
+            if (!operation.Responses.TryGetValue(statusCode, out var response))
+                continue;
+
+            foreach (var contentEntry in responseEntry.Value.EnumerateObject())
+            {
+                var contentType = contentEntry.Name;
+                if (!response.Content.TryGetValue(contentType, out var mediaType))
+                    continue;
+
+                if (contentEntry.Value.TryGetProperty("example", out var exampleProp))
+                {
+                    var exampleValue = ResolveValue(exampleProp.GetString());
+                    mediaType.Example = new OpenApiString(exampleValue);
+                }
+            }
+        }
+    }
+
+    private string ResolveValue(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return string.Empty;
+
+        raw = raw.Trim();
+        if (raw.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = raw.Substring("file:".Length).Trim();
+            var fullPath = Path.Combine(_specFolder, path);
+
+            if (File.Exists(fullPath))
+                return File.ReadAllText(fullPath);
+
+            _logger?.LogWarning("Referenced file not found: {File}", fullPath);
+            return $"[Missing file: {path}]";
+        }
+
+        return raw;
+    }
+
+    private string ResolveMarkdown(string? raw)
+    {
+        var content = ResolveValue(raw);
+        return $"<div markdown>{content}</div>";
+    }
+}
