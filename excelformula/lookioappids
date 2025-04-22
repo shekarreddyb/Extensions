@@ -1,0 +1,5 @@
+=TEXTJOIN("|", TRUE,
+  MAP(TEXTSPLIT(A2, "|"),
+    LAMBDA(app, XLOOKUP(app, tblApps[AppId], tblApps[LOB], "NotFound"))
+  )
+)
