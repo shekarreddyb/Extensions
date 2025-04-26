@@ -1,0 +1,13 @@
+CallbackViewer/
+├── Controllers/
+│   └── CallbackController.cs
+├── Pages/
+│   └── Index.razor
+├── Services/
+│   └── CallbackDataService.cs
+├── wwwroot/
+│   └── css/
+│       └── site.css
+├── _Host.cshtml
+├── Program.cs
+└── appsettings.json
