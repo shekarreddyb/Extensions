@@ -1,0 +1,164 @@
+@inject CallbackDataService CallbackService
+
+<div class="p-4">
+    <!-- Recent Callbacks and Clear All -->
+    <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+            <h2 class="text-xl font-bold">Recent Callbacks</h2>
+            <button class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+                    @onclick="ClearAll" disabled="@(!CallbackService.Callbacks.Any())">
+                Clear All
+            </button>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            @for (int i = 0; i < CallbackService.Callbacks.Count; i++)
+            {
+                <button class="px-2 py-1 bg-gray-300 rounded hover:bg-gray-400"
+                        @onclick="() => SelectCallback(i)">
+                    Callback @(i + 1)
+                </button>
+            }
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex space-x-4 mb-4">
+        <button class="px-4 py-2 bg-blue-500 text-white rounded" @onclick="() => selectedTab = "json"">JSON View</button>
+        <button class="px-4 py-2 bg-green-500 text-white rounded" @onclick="() => selectedTab = "ui"">UI View</button>
+    </div>
+
+    <!-- Toast -->
+    @if (showToast)
+    {
+        <div class="fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg animate-fade-in">
+            New callback received!
+        </div>
+    }
+
+    <!-- Selected Callback Content -->
+    @if (selectedCallbackJson == null)
+    {
+        <p>No callback selected.</p>
+    }
+    else
+    {
+        if (selectedTab == "json")
+        {
+            <textarea class="w-full h-96 p-2 border rounded" readonly>@selectedCallbackJson</textarea>
+        }
+        else if (selectedTab == "ui")
+        {
+            @if (parsedRoot.HasValue)
+            {
+                <div class="space-y-2">
+                    @RenderJson(parsedRoot.Value, 0)
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private string selectedTab = "json";
+    private int selectedIndex = 0;
+    private string? selectedCallbackJson;
+    private JsonElement? parsedRoot;
+    private bool showToast = false;
+
+    protected override void OnInitialized()
+    {
+        CallbackService.OnChange += async () =>
+        {
+            await InvokeAsync(async () =>
+            {
+                StateHasChanged();
+                ShowToast();
+                SelectCallback(0); // Always select latest
+            });
+        };
+    }
+
+    private void SelectCallback(int index)
+    {
+        selectedIndex = index;
+        var rawJson = CallbackService.Callbacks.ElementAtOrDefault(index);
+
+        if (!string.IsNullOrEmpty(rawJson))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(rawJson);
+
+                selectedCallbackJson = System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+
+                parsedRoot = doc.RootElement.Clone();
+            }
+            catch
+            {
+                selectedCallbackJson = rawJson;
+                parsedRoot = null;
+            }
+        }
+    }
+
+    private RenderFragment RenderJson(JsonElement element, int indentLevel) => builder =>
+    {
+        int seq = 0;
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    builder.OpenElement(seq++, "div");
+                    builder.AddAttribute(seq++, "class", "ml-" + (indentLevel * 4));
+                    builder.AddContent(seq++, property.Name + ":");
+                    builder.CloseElement();
+
+                    builder.AddContent(seq++, RenderJson(property.Value, indentLevel + 1));
+                }
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    builder.OpenElement(seq++, "div");
+                    builder.AddAttribute(seq++, "class", "ml-" + (indentLevel * 4));
+                    builder.AddContent(seq++, "-");
+                    builder.CloseElement();
+
+                    builder.AddContent(seq++, RenderJson(item, indentLevel + 1));
+                }
+                break;
+
+            default:
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "ml-" + (indentLevel * 4));
+                builder.AddContent(seq++, element.ToString());
+                builder.CloseElement();
+                break;
+        }
+    };
+
+    private void ClearAll()
+    {
+        CallbackService.ClearCallbacks();
+        selectedCallbackJson = null;
+        parsedRoot = null;
+        selectedIndex = 0;
+    }
+
+    private async void ShowToast()
+    {
+        showToast = true;
+        StateHasChanged();
+
+        await Task.Delay(3000);
+        showToast = false;
+        StateHasChanged();
+    }
+}
