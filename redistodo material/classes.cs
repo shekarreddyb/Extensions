@@ -1,4 +1,4 @@
-using System;
+eeusing System;
 using System.Globalization;
 using System.Windows.Data;
 
@@ -268,5 +268,15 @@ namespace RedisTodoApp.ViewModels
             remove => CommandManager.RequerySuggested -= value;
         }
     }
+
+
+namespace RedisTodoApp.Models
+{
+    public class TodoItem
+    {
+        public string Description { get; set; }
+        public long Index { get; set; }
+    }
+}
 }
 
