@@ -77,3 +77,33 @@ builder.Entity<TlsCertificate>()
         json => new OrganizationalUnits(JsonSerializer.Deserialize<List<string>>(json) ?? new())
     )
     .HasColumnType("nvarchar(max)");
+
+
+
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using System.Text.Json;
+
+public class JsonValueObjectConverter<TValueObject, TInner> : ValueConverter<TValueObject, string>
+{
+    public JsonValueObjectConverter(
+        Func<TInner, TValueObject> toValueObject,
+        Func<TValueObject, TInner> fromValueObject
+    )
+    : base(
+        v => JsonSerializer.Serialize(fromValueObject(v), new JsonSerializerOptions()),
+        v => toValueObject(JsonSerializer.Deserialize<TInner>(v, new JsonSerializerOptions())!)
+    )
+    {
+    }
+}
+
+
+
+
+builder.Entity<TlsCertificate>()
+    .Property(x => x.Ous)
+    .HasConversion(new JsonValueObjectConverter<OrganizationalUnits, List<string>>(
+        toValueObject: list => new OrganizationalUnits(list),
+        fromValueObject: vo => vo.Values.ToList()
+    ))
+    .HasColumnType("nvarchar(max)");
