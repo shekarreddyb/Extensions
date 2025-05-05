@@ -1,0 +1,119 @@
+// Program.cs (in your ASP.NET Core project)
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddHttpClient<IMyExternalService, MyExternalService>();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+app.MapGet("/api/data", async (IMyExternalService external, AppDbContext db) =>
+{
+    var data = await external.GetMessageAsync();
+    return Results.Ok(new { data });
+});
+
+app.Run();
+
+public partial class Program { } // Required for WebApplicationFactory
+
+// AppDbContext.cs
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    public DbSet<Item> Items => Set<Item>();
+}
+
+public class Item
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = default!;
+}
+
+// External service interface
+public interface IMyExternalService
+{
+    Task<string> GetMessageAsync();
+}
+
+public class MyExternalService : IMyExternalService
+{
+    private readonly HttpClient _client;
+    public MyExternalService(HttpClient client) => _client = client;
+
+    public async Task<string> GetMessageAsync()
+    {
+        var res = await _client.GetStringAsync("/fake");
+        return res;
+    }
+}
+
+// Test.cs (in your Test project)
+public class CustomWebApplicationFactory : WebApplicationFactory<Program>
+{
+    public Action<IServiceCollection>? ConfigureTestServices { get; set; }
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+        builder.ConfigureAppConfiguration(config =>
+        {
+            config.Sources.Clear();
+            config.AddJsonFile("appsettings-test.json", optional: false);
+        });
+        builder.ConfigureServices(services =>
+        {
+            ConfigureTestServices?.Invoke(services);
+        });
+        return base.CreateHost(builder);
+    }
+}
+
+public class IntegrationTests : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly HttpClient _client;
+
+    public IntegrationTests()
+    {
+        var factory = new CustomWebApplicationFactory();
+
+        // Setup mocks
+        factory.ConfigureTestServices = services =>
+        {
+            // Use in-memory DB
+            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.AddDbContext<AppDbContext>(opts => opts.UseInMemoryDatabase("TestDb"));
+
+            // Mock HttpClient
+            var mockHandler = new Mock<HttpMessageHandler>();
+            mockHandler
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent("mocked-response")
+                });
+
+            services.RemoveAll<IMyExternalService>();
+            services.AddHttpClient<IMyExternalService, MyExternalService>()
+                    .ConfigurePrimaryHttpMessageHandler(() => mockHandler.Object);
+        };
+
+        _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task Get_ReturnsMockedData()
+    {
+        var response = await _client.GetAsync("/api/data");
+        response.EnsureSuccessStatusCode();
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.Contains("mocked-response", content);
+    }
+}
