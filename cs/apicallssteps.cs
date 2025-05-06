@@ -111,3 +111,18 @@ public class ApiSteps
         });
     }
 }
+
+
+
+Scenario: Create and verify user
+  Given I set the base URI to "https://localhost:5001"
+  And I prepare a POST request to "/api/users" with body from "payloads/user-create.json"
+  When I send the request
+  Then the response status code should be 201
+  And the response should contain JSON field "id"
+  Then save response field "id" as "createdUserId"
+
+  Given I prepare a GET request to "/api/users/{createdUserId}"
+  When I send the request
+  Then the response status code should be 200
+  And the response should have JSON field "name" with value "John Doe"
