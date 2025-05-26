@@ -4,10 +4,16 @@ public class ConsoleSpinner
     private int _counter = 0;
     private bool _active;
     private Thread? _thread;
-    private string _label = "";
     private readonly Stopwatch _stopwatch = new();
+    private readonly int _consoleLine;
 
+    private string _label = "";
     public string StatusText { get; set; } = "";
+
+    public ConsoleSpinner(int consoleLine)
+    {
+        _consoleLine = consoleLine;
+    }
 
     public void Start(string label)
     {
@@ -33,8 +39,13 @@ public class ConsoleSpinner
         _thread?.Join();
         _stopwatch.Stop();
 
-        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r"); // clear line
-        Console.WriteLine($"[✓] {_label}: {doneMessage} in {_stopwatch.Elapsed.TotalSeconds:F1}s");
+        lock (Console.Out)
+        {
+            Console.SetCursorPosition(0, _consoleLine);
+            Console.Write(new string(' ', Console.WindowWidth));
+            Console.SetCursorPosition(0, _consoleLine);
+            Console.WriteLine($"[✓] {_label}: {doneMessage} in {_stopwatch.Elapsed.TotalSeconds:F1}s");
+        }
     }
 
     private void Draw()
@@ -42,6 +53,12 @@ public class ConsoleSpinner
         var symbol = _sequence[_counter++ % _sequence.Length];
         var time = $"{_stopwatch.Elapsed.TotalSeconds:F1}s";
 
-        Console.Write($"\r[{symbol}] {_label}... {StatusText} ({time})");
+        lock (Console.Out)
+        {
+            Console.SetCursorPosition(0, _consoleLine);
+            Console.Write(new string(' ', Console.WindowWidth));
+            Console.SetCursorPosition(0, _consoleLine);
+            Console.Write($"[{symbol}] {_label}... {StatusText} ({time})");
+        }
     }
 }
