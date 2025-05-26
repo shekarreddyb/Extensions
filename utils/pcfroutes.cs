@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using YamlDotNet.Serialization;
@@ -19,8 +20,11 @@ public class Foundation
 {
     public string Name { get; set; }
     public string Api { get; set; }
-    public string Token { get; set; }
     public bool Active { get; set; }
+    public string ClientId { get; set; }
+    public string ClientSecret { get; set; }
+
+    public string UaaUrl => Api.Replace("api.", "uaa.") + "/oauth/token";
 }
 
 public static class YamlReader
@@ -32,6 +36,31 @@ public static class YamlReader
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .Build();
         return deserializer.Deserialize<FoundationConfig>(yaml);
+    }
+}
+
+public static class TokenFetcher
+{
+    public static async Task<string> GetAccessTokenAsync(string uaaUrl, string clientId, string clientSecret)
+    {
+        using var client = new HttpClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, uaaUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"))
+        );
+
+        request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            { "grant_type", "client_credentials" },
+            { "response_type", "token" }
+        });
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+        return json["access_token"]?.ToString() ?? throw new Exception("Token fetch failed");
     }
 }
 
@@ -90,18 +119,14 @@ public class PcfApiClient
         {
             var resp = await _client.GetAsync(nextUrl);
             resp.EnsureSuccessStatusCode();
-            var content = JObject.Parse(await resp.Content.ReadAsStringAsync());
+            var json = JObject.Parse(await resp.Content.ReadAsStringAsync());
 
-            var pageResources = content["resources"]?.ToList() ?? new List<JToken>();
-            results.AddRange(pageResources);
+            results.AddRange(json["resources"]?.ToList() ?? new List<JToken>());
 
-            nextUrl = content["pagination"]?["next"]?["href"]?.ToString();
+            nextUrl = json["pagination"]?["next"]?["href"]?.ToString();
 
-            // Convert to relative URL if full
             if (!string.IsNullOrEmpty(nextUrl) && nextUrl.StartsWith(_client.BaseAddress.ToString()))
-            {
                 nextUrl = nextUrl.Replace(_client.BaseAddress.ToString(), "");
-            }
         }
 
         return results;
@@ -121,12 +146,11 @@ public static class ExcelExporter
 
         for (int i = 0; i < data.Count; i++)
         {
-            var row = i + 2;
             var (foundation, app, org, route) = data[i];
-            sheet.Cell(row, 1).Value = foundation;
-            sheet.Cell(row, 2).Value = app;
-            sheet.Cell(row, 3).Value = org;
-            sheet.Cell(row, 4).Value = route;
+            sheet.Cell(i + 2, 1).Value = foundation;
+            sheet.Cell(i + 2, 2).Value = app;
+            sheet.Cell(i + 2, 3).Value = org;
+            sheet.Cell(i + 2, 4).Value = route;
         }
 
         workbook.SaveAs(path);
@@ -142,11 +166,13 @@ class Program
 
         foreach (var foundation in config.Foundations.Where(f => f.Active))
         {
-            Console.WriteLine($"Querying foundation: {foundation.Name}");
-
             try
             {
-                var client = new PcfApiClient(foundation.Api, foundation.Token);
+                Console.WriteLine($"Authenticating with {foundation.Name}...");
+                var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
+
+                Console.WriteLine($"Querying apps in {foundation.Name}...");
+                var client = new PcfApiClient(foundation.Api, token);
                 var apps = await client.GetAppDetailsAsync();
 
                 foreach (var (app, org, route) in apps)
@@ -159,6 +185,6 @@ class Program
         }
 
         ExcelExporter.Export("cf_apps.xlsx", allData);
-        Console.WriteLine("Export complete.");
+        Console.WriteLine("Excel export complete.");
     }
 }
