@@ -1,190 +1,166 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json.Linq;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
-using ClosedXML.Excel;
+using System; using System.Collections.Concurrent; using System.Collections.Generic; using System.IO; using System.Linq; using System.Net.Http; using System.Net.Http.Headers; using System.Text; using System.Threading.Tasks; using Newtonsoft.Json.Linq; using YamlDotNet.Serialization; using YamlDotNet.Serialization.NamingConventions;
 
-public class FoundationConfig
-{
-    public List<Foundation> Foundations { get; set; }
+public class FoundationConfig { public List<Foundation> Foundations { get; set; } }
+
+public class Foundation { public string Name { get; set; } public string Api { get; set; } public bool Active { get; set; }
+
+[YamlIgnore]
+public string ClientId { get; set; }
+
+[YamlIgnore]
+public string ClientSecret { get; set; }
+
+public string UaaUrl => Api.Replace("api.", "uaa.") + "/oauth/token";
+
 }
 
-public class Foundation
-{
-    public string Name { get; set; }
-    public string Api { get; set; }
-    public bool Active { get; set; }
-    public string ClientId { get; set; }
-    public string ClientSecret { get; set; }
+public static class YamlReader { public static FoundationConfig Load(string path) { var yaml = File.ReadAllText(path); var deserializer = new DeserializerBuilder() .WithNamingConvention(CamelCaseNamingConvention.Instance) .Build(); return deserializer.Deserialize<FoundationConfig>(yaml); } }
 
-    public string UaaUrl => Api.Replace("api.", "uaa.") + "/oauth/token";
-}
+public static class TokenFetcher { public static async Task<string> GetAccessTokenAsync(string uaaUrl, string clientId, string clientSecret) { using var client = new HttpClient(); var request = new HttpRequestMessage(HttpMethod.Post, uaaUrl); request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}")));
 
-public static class YamlReader
-{
-    public static FoundationConfig Load(string path)
+request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
     {
-        var yaml = File.ReadAllText(path);
-        var deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        return deserializer.Deserialize<FoundationConfig>(yaml);
-    }
+        { "grant_type", "client_credentials" },
+        { "response_type", "token" }
+    });
+
+    var response = await client.SendAsync(request);
+    response.EnsureSuccessStatusCode();
+
+    var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+    return json["access_token"]?.ToString() ?? throw new Exception("Token fetch failed");
 }
 
-public static class TokenFetcher
+}
+
+public class PcfApiClient { private readonly HttpClient _client;
+
+public PcfApiClient(string apiUrl, string token)
 {
-    public static async Task<string> GetAccessTokenAsync(string uaaUrl, string clientId, string clientSecret)
+    _client = new HttpClient { BaseAddress = new Uri(apiUrl) };
+    _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+}
+
+public async Task<List<JToken>> GetPaginatedResourcesAsync(string endpoint)
+{
+    var results = new List<JToken>();
+    string? nextUrl = endpoint;
+
+    while (!string.IsNullOrEmpty(nextUrl))
     {
-        using var client = new HttpClient();
+        var resp = await _client.GetAsync(nextUrl);
+        resp.EnsureSuccessStatusCode();
+        var json = JObject.Parse(await resp.Content.ReadAsStringAsync());
+        results.AddRange(json["resources"]?.ToList() ?? new List<JToken>());
 
-        var request = new HttpRequestMessage(HttpMethod.Post, uaaUrl);
-        request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"))
-        );
-
-        request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var nextToken = json["pagination"]?["next"]?["href"];
+        if (nextToken == null || nextToken.Type == JTokenType.Null)
         {
-            { "grant_type", "client_credentials" },
-            { "response_type", "token" }
-        });
-
-        var response = await client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        var json = JObject.Parse(await response.Content.ReadAsStringAsync());
-        return json["access_token"]?.ToString() ?? throw new Exception("Token fetch failed");
-    }
-}
-
-public class PcfApiClient
-{
-    private readonly HttpClient _client;
-
-    public PcfApiClient(string baseUrl, string token)
-    {
-        _client = new HttpClient { BaseAddress = new Uri(baseUrl) };
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    }
-
-    public async Task<List<(string AppName, string OrgName, string Route)>> GetAppDetailsAsync()
-    {
-        var appResources = await GetPaginatedResourcesAsync("/v3/apps");
-        var results = new List<(string, string, string)>();
-
-        foreach (var app in appResources)
-        {
-            var appName = app["name"]?.ToString();
-            var appGuid = app["guid"]?.ToString();
-            if (string.IsNullOrEmpty(appGuid)) continue;
-
-            var spaceGuid = app["relationships"]?["space"]?["data"]?["guid"]?.ToString();
-            if (string.IsNullOrEmpty(spaceGuid)) continue;
-
-            var spaceResp = await _client.GetAsync($"/v3/spaces/{spaceGuid}");
-            var space = JObject.Parse(await spaceResp.Content.ReadAsStringAsync());
-
-            var orgGuid = space["relationships"]?["organization"]?["data"]?["guid"]?.ToString();
-            if (string.IsNullOrEmpty(orgGuid)) continue;
-
-            var orgResp = await _client.GetAsync($"/v3/organizations/{orgGuid}");
-            var org = JObject.Parse(await orgResp.Content.ReadAsStringAsync());
-            var orgName = org["name"]?.ToString() ?? "Unknown";
-
-            var routeResources = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
-            var routeHostnames = routeResources.Select(r => r["url"]?.ToString() ?? "Unknown");
-
-            foreach (var route in routeHostnames)
-            {
-                results.Add((appName, orgName, route));
-            }
+            nextUrl = null;
         }
-
-        return results;
-    }
-
-    private async Task<List<JToken>> GetPaginatedResourcesAsync(string endpoint)
-    {
-        var results = new List<JToken>();
-        string? nextUrl = endpoint;
-
-        while (!string.IsNullOrEmpty(nextUrl))
+        else
         {
-            var resp = await _client.GetAsync(nextUrl);
-            resp.EnsureSuccessStatusCode();
-            var json = JObject.Parse(await resp.Content.ReadAsStringAsync());
-
-            results.AddRange(json["resources"]?.ToList() ?? new List<JToken>());
-
-            nextUrl = json["pagination"]?["next"]?["href"]?.ToString();
-
-            if (!string.IsNullOrEmpty(nextUrl) && nextUrl.StartsWith(_client.BaseAddress.ToString()))
+            nextUrl = nextToken.ToString();
+            if (nextUrl.StartsWith(_client.BaseAddress.ToString()))
                 nextUrl = nextUrl.Replace(_client.BaseAddress.ToString(), "");
         }
-
-        return results;
     }
+
+    return results;
 }
 
-public static class ExcelExporter
+public async Task<List<(string Org, string App, string Route)>> FetchAppsGroupedByOrgAsync(int orgBatchSize = 10)
 {
-    public static void Export(string path, List<(string Foundation, string App, string Org, string Route)> data)
+    var results = new List<(string Org, string App, string Route)>();
+    var orgs = await GetPaginatedResourcesAsync("/v3/organizations");
+    var orgMap = orgs
+        .Where(o => o["guid"] != null && o["name"] != null)
+        .ToDictionary(o => o["guid"]!.ToString(), o => o["name"]!.ToString());
+
+    foreach (var batch in orgMap.Keys.Chunk(orgBatchSize))
     {
-        using var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("CF Apps");
-        sheet.Cell(1, 1).Value = "Foundation";
-        sheet.Cell(1, 2).Value = "App";
-        sheet.Cell(1, 3).Value = "Org";
-        sheet.Cell(1, 4).Value = "Route";
+        var guidList = string.Join(",", batch);
+        var apps = await GetPaginatedResourcesAsync($"/v3/apps?organization_guids={guidList}");
 
-        for (int i = 0; i < data.Count; i++)
+        var tasks = apps.Select(async app =>
         {
-            var (foundation, app, org, route) = data[i];
-            sheet.Cell(i + 2, 1).Value = foundation;
-            sheet.Cell(i + 2, 2).Value = app;
-            sheet.Cell(i + 2, 3).Value = org;
-            sheet.Cell(i + 2, 4).Value = route;
-        }
+            var appName = app["name"]?.ToString() ?? "Unknown";
+            var appGuid = app["guid"]?.ToString();
+            var orgGuid = app["relationships"]?["organization"]?["data"]?["guid"]?.ToString();
+            var orgName = orgMap.GetValueOrDefault(orgGuid ?? "") ?? "Unknown";
 
-        workbook.SaveAs(path);
+            if (!string.IsNullOrEmpty(appGuid))
+            {
+                var routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
+                foreach (var route in routes)
+                {
+                    var url = route["url"]?.ToString() ?? "Unknown";
+                    lock (results) results.Add((orgName, appName, url));
+                }
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    return results;
+}
+
+}
+
+public static class CsvExporter { public static void Export(string path, List<(string Foundation, string Org, string App, string Route)> data) { using var writer = new StreamWriter(path); writer.WriteLine("Foundation,Org,App Name,Route");
+
+foreach (var (foundation, org, app, route) in data)
+    {
+        var line = $"{Escape(foundation)},{Escape(org)},{Escape(app)},{Escape(route)}";
+        writer.WriteLine(line);
     }
 }
 
-class Program
+private static string Escape(string input)
 {
-    static async Task Main()
-    {
-        var config = YamlReader.Load("foundations.yml");
-        var allData = new List<(string Foundation, string App, string Org, string Route)>();
-
-        foreach (var foundation in config.Foundations.Where(f => f.Active))
-        {
-            try
-            {
-                Console.WriteLine($"Authenticating with {foundation.Name}...");
-                var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
-
-                Console.WriteLine($"Querying apps in {foundation.Name}...");
-                var client = new PcfApiClient(foundation.Api, token);
-                var apps = await client.GetAppDetailsAsync();
-
-                foreach (var (app, org, route) in apps)
-                    allData.Add((foundation.Name, app, org, route));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in {foundation.Name}: {ex.Message}");
-            }
-        }
-
-        ExcelExporter.Export("cf_apps.xlsx", allData);
-        Console.WriteLine("Excel export complete.");
-    }
+    if (input.Contains(",") || input.Contains("\"") || input.Contains("\n"))
+        return $"\"{input.Replace("\"", "\"\"")}\"";
+    return input;
 }
+
+}
+
+class Program { static async Task Main(string[] args) { if (args.Length < 2) { Console.WriteLine("Usage: app.exe <clientId> <clientSecret>"); return; }
+
+string globalClientId = args[0];
+    string globalClientSecret = args[1];
+
+    var config = YamlReader.Load("foundations.yml");
+    var results = new ConcurrentBag<(string Foundation, string Org, string App, string Route)>();
+
+    var tasks = config.Foundations.Where(f => f.Active).Select(async foundation =>
+    {
+        try
+        {
+            foundation.ClientId = globalClientId;
+            foundation.ClientSecret = globalClientSecret;
+
+            Console.WriteLine($"[{foundation.Name}] Authenticating...");
+            var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
+            var client = new PcfApiClient(foundation.Api, token);
+            var apps = await client.FetchAppsGroupedByOrgAsync();
+
+            foreach (var (org, app, route) in apps)
+                results.Add((foundation.Name, org, app, route));
+
+            Console.WriteLine($"[{foundation.Name}] Done.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[!] {foundation.Name} error: {ex.Message}");
+        }
+    });
+
+    await Task.WhenAll(tasks);
+    CsvExporter.Export("cf_apps.csv", results.ToList());
+    Console.WriteLine("CSV export completed.");
+}
+
+}
+
