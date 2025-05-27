@@ -104,38 +104,45 @@ public class PcfApiClient
         return results;
     }
 
-    public async Task<List<(string Org, string App, string Route)>> FetchAppsGroupedByOrgAsync(int orgBatchSize = 10)
+    public async Task<List<(string Org, string App, string Route)>> FetchAppsByOrgAndSpaceAsync()
     {
         var results = new List<(string Org, string App, string Route)>();
+
         var orgs = await GetPaginatedResourcesAsync("/v3/organizations");
-        var orgMap = orgs
-            .Where(o => o["guid"] != null && o["name"] != null)
-            .ToDictionary(o => o["guid"]!.ToString(), o => o["name"]!.ToString());
 
-        foreach (var batch in orgMap.Keys.Chunk(orgBatchSize))
+        foreach (var org in orgs)
         {
-            var guidList = string.Join(",", batch);
-            var apps = await GetPaginatedResourcesAsync($"/v3/apps?organization_guids={guidList}");
+            var orgGuid = org["guid"]?.ToString();
+            var orgName = org["name"]?.ToString() ?? "Unknown";
+            if (string.IsNullOrEmpty(orgGuid)) continue;
 
-            var tasks = apps.Select(async app =>
+            var spaces = await GetPaginatedResourcesAsync($"/v3/organizations/{orgGuid}/spaces");
+
+            foreach (var space in spaces)
             {
-                var appName = app["name"]?.ToString() ?? "Unknown";
-                var appGuid = app["guid"]?.ToString();
-                var orgGuid = app["relationships"]?["organization"]?["data"]?["guid"]?.ToString();
-                var orgName = orgMap.GetValueOrDefault(orgGuid ?? "") ?? "Unknown";
+                var spaceGuid = space["guid"]?.ToString();
+                if (string.IsNullOrEmpty(spaceGuid)) continue;
 
-                if (!string.IsNullOrEmpty(appGuid))
+                var apps = await GetPaginatedResourcesAsync($"/v3/spaces/{spaceGuid}/apps");
+
+                var tasks = apps.Select(async app =>
                 {
-                    var routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
-                    foreach (var route in routes)
-                    {
-                        var url = route["url"]?.ToString() ?? "Unknown";
-                        lock (results) results.Add((orgName, appName, url));
-                    }
-                }
-            });
+                    var appName = app["name"]?.ToString() ?? "Unknown";
+                    var appGuid = app["guid"]?.ToString();
 
-            await Task.WhenAll(tasks);
+                    if (!string.IsNullOrEmpty(appGuid))
+                    {
+                        var routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
+                        foreach (var route in routes)
+                        {
+                            var url = route["url"]?.ToString() ?? "Unknown";
+                            lock (results) results.Add((orgName, appName, url));
+                        }
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+            }
         }
 
         return results;
@@ -190,7 +197,7 @@ class Program
                 Console.WriteLine($"[{foundation.Name}] Authenticating...");
                 var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
                 var client = new PcfApiClient(foundation.Api, token);
-                var apps = await client.FetchAppsGroupedByOrgAsync();
+                var apps = await client.FetchAppsByOrgAndSpaceAsync();
 
                 foreach (var (org, app, route) in apps)
                     results.Add((foundation.Name, org, app, route));
