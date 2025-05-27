@@ -1,4 +1,4 @@
-using System; using System.Collections.Concurrent; using System.Collections.Generic; using System.IO; using System.Linq; using System.Net.Http; using System.Net.Http.Headers; using System.Text; using System.Threading.Tasks; using Newtonsoft.Json.Linq; using YamlDotNet.Serialization; using YamlDotNet.Serialization.NamingConventions;
+using System; using System.Collections.Concurrent; using System.Collections.Generic; using System.IO; using System.Linq; using System.Net.Http; using System.Net.Http.Headers; using System.Text; using System.Threading; using System.Threading.Tasks; using Newtonsoft.Json.Linq; using YamlDotNet.Serialization; using YamlDotNet.Serialization.NamingConventions;
 
 public class FoundationConfig { public List<Foundation> Foundations { get; set; } }
 
@@ -69,48 +69,59 @@ public async Task<List<JToken>> GetPaginatedResourcesAsync(string endpoint)
     return results;
 }
 
-public async Task<List<(string Org, string App, string Route)>> FetchAllRelationshipsAsync()
+public async Task<List<(string Org, string App, string Route)>> FetchAllRelationshipsAsync(IProgress<string> progress)
 {
     var orgsTask = GetPaginatedResourcesAsync("/v3/organizations");
     var spacesTask = GetPaginatedResourcesAsync("/v3/spaces");
     var appsTask = GetPaginatedResourcesAsync("/v3/apps");
-    var routesTask = GetPaginatedResourcesAsync("/v3/routes");
 
-    await Task.WhenAll(orgsTask, spacesTask, appsTask, routesTask);
+    await Task.WhenAll(orgsTask, spacesTask, appsTask);
 
     var orgs = orgsTask.Result;
     var spaces = spacesTask.Result;
     var apps = appsTask.Result;
-    var routes = routesTask.Result;
 
     var orgMap = orgs.ToDictionary(o => o["guid"]!.ToString(), o => o["name"]!.ToString());
     var spaceToOrgMap = spaces.ToDictionary(
         s => s["guid"]!.ToString(),
         s => s["relationships"]?["organization"]?["data"]?["guid"]?.ToString() ?? ""
     );
-    var appMap = apps.ToDictionary(
+    var appToSpaceMap = apps.ToDictionary(
         a => a["guid"]!.ToString(),
         a => (a["name"]?.ToString() ?? "Unknown", a["relationships"]?["space"]?["data"]?["guid"]?.ToString())
     );
 
     var results = new ConcurrentBag<(string Org, string App, string Route)>();
-
-    var tasks = routes.Select(route => Task.Run(() =>
+    var semaphore = new SemaphoreSlim(10);
+    int completed = 0;
+    var tasks = apps.Select(async app =>
     {
-        var url = route["url"]?.ToString() ?? "Unknown";
-        var appRef = route["relationships"]?["app"]?["data"]?["guid"]?.ToString();
+        var appGuid = app["guid"]?.ToString();
+        if (string.IsNullOrEmpty(appGuid)) return;
 
-        if (string.IsNullOrEmpty(appRef)) return;
+        await semaphore.WaitAsync();
+        try
+        {
+            var routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
+            if (!appToSpaceMap.TryGetValue(appGuid, out var appInfo)) return;
+            var (appName, spaceGuid) = appInfo;
+            if (string.IsNullOrEmpty(spaceGuid)) return;
+            if (!spaceToOrgMap.TryGetValue(spaceGuid, out var orgGuid)) return;
+            var orgName = orgMap.GetValueOrDefault(orgGuid ?? "", "Unknown");
 
-        if (!appMap.TryGetValue(appRef, out var appInfo)) return;
-        var (appName, spaceGuid) = appInfo;
-
-        if (string.IsNullOrEmpty(spaceGuid)) return;
-        if (!spaceToOrgMap.TryGetValue(spaceGuid, out var orgGuid)) return;
-
-        var orgName = orgMap.GetValueOrDefault(orgGuid ?? "", "Unknown");
-        results.Add((orgName, appName, url));
-    }));
+            foreach (var route in routes)
+            {
+                var url = route["url"]?.ToString() ?? "Unknown";
+                results.Add((orgName, appName, url));
+            }
+        }
+        finally
+        {
+            Interlocked.Increment(ref completed);
+            progress.Report($"App routes fetched: {completed}/{apps.Count}");
+            semaphore.Release();
+        }
+    });
 
     await Task.WhenAll(tasks);
     return results.ToList();
@@ -142,9 +153,12 @@ string globalClientId = args[0];
     string globalClientSecret = args[1];
 
     var config = YamlReader.Load("foundations.yml");
+    var activeFoundations = config.Foundations.Where(f => f.Active).ToList();
+    var total = activeFoundations.Count;
+    var completed = 0;
     var results = new ConcurrentBag<(string Foundation, string Org, string App, string Route)>();
 
-    var tasks = config.Foundations.Where(f => f.Active).Select(async foundation =>
+    var tasks = activeFoundations.Select(async foundation =>
     {
         try
         {
@@ -154,12 +168,14 @@ string globalClientId = args[0];
             Console.WriteLine($"[{foundation.Name}] Authenticating...");
             var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
             var client = new PcfApiClient(foundation.Api, token);
-            var apps = await client.FetchAllRelationshipsAsync();
+            var progress = new Progress<string>(msg => Console.WriteLine($"[{foundation.Name}] {msg}"));
+            var apps = await client.FetchAllRelationshipsAsync(progress);
 
             foreach (var (org, app, route) in apps)
                 results.Add((foundation.Name, org, app, route));
 
-            Console.WriteLine($"[{foundation.Name}] Done.");
+            Interlocked.Increment(ref completed);
+            Console.WriteLine($"[{foundation.Name}] Completed ({completed}/{total})");
         }
         catch (Exception ex)
         {
