@@ -49,7 +49,7 @@ public async Task<List<JToken>> GetPaginatedResourcesAsync(string endpoint)
     while (!string.IsNullOrEmpty(nextUrl))
     {
         var resp = await _client.GetAsync(nextUrl);
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode) break;
         var json = JObject.Parse(await resp.Content.ReadAsStringAsync());
         results.AddRange(json["resources"]?.ToList() ?? new List<JToken>());
 
@@ -69,7 +69,19 @@ public async Task<List<JToken>> GetPaginatedResourcesAsync(string endpoint)
     return results;
 }
 
-public async Task<List<(string Org, string App, string Route)>> FetchAllRelationshipsAsync(IProgress<string> progress)
+public async Task<List<JToken>> SafeGetPaginatedResourcesAsync(string endpoint)
+{
+    try
+    {
+        return await GetPaginatedResourcesAsync(endpoint);
+    }
+    catch
+    {
+        return new List<JToken>();
+    }
+}
+
+public async Task<List<(string Org, string App, string Route)>> FetchAllRelationshipsAsync()
 {
     var orgsTask = GetPaginatedResourcesAsync("/v3/organizations");
     var spacesTask = GetPaginatedResourcesAsync("/v3/spaces");
@@ -93,7 +105,7 @@ public async Task<List<(string Org, string App, string Route)>> FetchAllRelation
 
     var results = new ConcurrentBag<(string Org, string App, string Route)>();
     var semaphore = new SemaphoreSlim(10);
-    int completed = 0;
+
     var tasks = apps.Select(async app =>
     {
         var appGuid = app["guid"]?.ToString();
@@ -102,9 +114,21 @@ public async Task<List<(string Org, string App, string Route)>> FetchAllRelation
         await semaphore.WaitAsync();
         try
         {
-            var routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
+            List<JToken> routes;
+            try
+            {
+                routes = await GetPaginatedResourcesAsync($"/v3/apps/{appGuid}/routes");
+            }
+            catch (HttpRequestException)
+            {
+                var appName = app["name"]?.ToString() ?? "Unknown";
+                var refetched = await SafeGetPaginatedResourcesAsync($"/v3/apps?names={Uri.EscapeDataString(appName)}");
+                var newAppGuid = refetched.FirstOrDefault()? ["guid"]?.ToString();
+                routes = string.IsNullOrEmpty(newAppGuid) ? new List<JToken>() : await SafeGetPaginatedResourcesAsync($"/v3/apps/{newAppGuid}/routes");
+            }
+
             if (!appToSpaceMap.TryGetValue(appGuid, out var appInfo)) return;
-            var (appName, spaceGuid) = appInfo;
+            var (appNameFinal, spaceGuid) = appInfo;
             if (string.IsNullOrEmpty(spaceGuid)) return;
             if (!spaceToOrgMap.TryGetValue(spaceGuid, out var orgGuid)) return;
             var orgName = orgMap.GetValueOrDefault(orgGuid ?? "", "Unknown");
@@ -112,13 +136,11 @@ public async Task<List<(string Org, string App, string Route)>> FetchAllRelation
             foreach (var route in routes)
             {
                 var url = route["url"]?.ToString() ?? "Unknown";
-                results.Add((orgName, appName, url));
+                results.Add((orgName, appNameFinal, url));
             }
         }
         finally
         {
-            Interlocked.Increment(ref completed);
-            progress.Report($"App routes fetched: {completed}/{apps.Count}");
             semaphore.Release();
         }
     });
@@ -168,8 +190,8 @@ string globalClientId = args[0];
             Console.WriteLine($"[{foundation.Name}] Authenticating...");
             var token = await TokenFetcher.GetAccessTokenAsync(foundation.UaaUrl, foundation.ClientId, foundation.ClientSecret);
             var client = new PcfApiClient(foundation.Api, token);
-            var progress = new Progress<string>(msg => Console.WriteLine($"[{foundation.Name}] {msg}"));
-            var apps = await client.FetchAllRelationshipsAsync(progress);
+            Console.WriteLine($"[{foundation.Name}] Fetching data...");
+            var apps = await client.FetchAllRelationshipsAsync();
 
             foreach (var (org, app, route) in apps)
                 results.Add((foundation.Name, org, app, route));
