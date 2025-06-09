@@ -1,0 +1,51 @@
+```mermaid
+flowchart TD
+    A[API Consumer (User or System)] --> B[POST /api/databases<br/>(includes callback URL)]
+    B --> C[Create Transaction + Tasks<br/>- Single or CRDB<br/>- Memory / TLS / Clusters]
+    C --> D[Publish StartProvisioningTask events]
+    D --> E[OperationTaskSaga (MassTransit Saga)<br/>Handles Start & Polling<br/>Calls Redis REST API]
+    E --> F[Poll Redis API for Status<br/>Until Success or Max Retries]
+    F --> G1[If Success → TaskSucceeded]
+    F --> G2[If Failure → TaskFailed]
+    G1 --> H[Update Task & TransactionDetails<br/>Trigger next tasks]
+    G2 --> H
+    H --> I[All Tasks Complete<br/>Finalize Transaction]
+    I --> J[Call callback URL (user-provided)]
+
+    subgraph Background Process
+        K[Cluster Capacity Worker<br/>Updates shard counts in DB]
+    end
+
+    K -.-> C
+
+    classDef dark fill:#1f1f1f,stroke:#aaa,color:#fff;
+    class B,C,D,E,F,G1,G2,H,I,J,K dark
+```
+
+
+
+@startuml
+actor User
+User -> API : POST /api/databases
+API -> Domain : Create Transaction + Tasks
+Domain -> Bus : Publish StartProvisioningTask
+Bus -> Saga : Start Task Saga (OperationTaskSaga)
+Saga -> RedisAPI : Call Redis Platform REST API
+RedisAPI -> Saga : Response (in progress or done)
+
+alt Success
+    Saga -> Bus : Publish TaskSucceeded
+else Failure
+    Saga -> Bus : Publish TaskFailed
+end
+
+Bus -> Domain : Update Task, TransactionDetails
+Domain -> Bus : Publish next task (if any)
+Domain -> API : Finalize Transaction
+API -> User : Call callback URL
+
+== Background ==
+entity "Cluster Capacity Worker" as Worker
+Worker --> Domain : Update Cluster Shard Info
+@enduml
+
